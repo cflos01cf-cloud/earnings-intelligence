@@ -304,7 +304,7 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
   const toTrade = (p: OosPrediction): Trade => {
     const row = rows.find((r) => r.id === p.id)!;
     const entryDate = mode === 'PRE' ? row.baseDate : row.day0Date;
-    return { symbol: p.symbol, entryDate, exitDate: p.endDate, ret: p.ret, entryAt: mode === 'PRE' ? 'close' : 'open' };
+    return { symbol: p.symbol, entryDate, exitDate: p.endDate, ret: p.ret, entryAt: 'close' };
   };
   const strat = (name: string, description: string, take: (p: OosPrediction) => boolean): StrategyMetrics => {
     const chosen = preds.filter((p) => take(p) && barsOK(p));
@@ -315,7 +315,7 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
     return { name, description, ...tradeStats(rets), ...curveStats(sim.equity), equity: thin(sim.equity) };
   };
   base.strategies.push(strat('Modelo', `Compra si P(subida) − P(bajada) ≥ ${(edge * 100).toFixed(0)} pp, P(subida) ≥ P(lateral) y el modelo ya superó al baseline en bloques anteriores. Solo largos (en GBM no hay cortos en acciones de EE.UU.).`, (p) => p.gateOpen && isLongSignal(p.model, edge)));
-  if (mode === 'POST') base.strategies.push(strat('Solo sorpresa de EPS', 'Compra en la apertura si el EPS superó el consenso.', (p) => p.epsVerdict === 'BEAT'));
+  if (mode === 'POST') base.strategies.push(strat('Solo sorpresa de EPS', 'Compra al cierre del día 0 si el EPS superó el consenso.', (p) => p.epsVerdict === 'BEAT'));
   base.strategies.push(strat(mode === 'PRE' ? 'Comprar antes de todo reporte' : 'Comprar después de todo reporte', 'Sin filtro: mide si el modelo agrega algo a operar cada reporte.', () => true));
   base.strategies.push({ name: 'No operar', description: 'Referencia: 0%.', trades: 0, winRate: null, winRateCI: null, avgWin: null, avgLoss: null, expectancy: null, expectancyCI: null, netReturn: 0, cagr: 0, maxDrawdown: 0, sharpe: null, sortino: null, calmar: null, equity: [] });
   if (base.testStart && base.testEnd) {

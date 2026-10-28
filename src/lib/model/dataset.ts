@@ -4,14 +4,14 @@
  * Reglas anti look-ahead (probadas en tests/no-lookahead.test.ts):
  *   - PRE  decide al cierre de la base: solo velas ≤ base, trimestres presentados antes de la base,
  *          reportes previos cuya reacción a 1 sesión ya terminó.
- *   - POST decide en la apertura del día 0: lo anterior + cifras del reporte + apertura del día 0.
- *          El volumen del día 0 NO se usa (no se conoce en la apertura).
+ *   - POST decide al CIERRE del día 0: lo anterior + cifras del reporte + reacción y volumen del día 0.
+ *          Nada posterior al cierre del día 0.
  *   - Consenso de ingresos solo si lo observamos antes del día del anuncio.
  */
 import type { Bar, Company, Horizon, Mode, Outcome, QuarterFundamentals } from '../types';
 import { HORIZONS } from '../types';
 import type { MergedEvent } from '../analysis/events';
-import { abnormalVolume, align, benchmarkReturn, classify, dailyVol, flatBand, labelReturn, lowerBound, trailingReturn } from '../analysis/reaction';
+import { abnormalVolume, align, benchmarkReturn, classify, dailyVol, flatBand, labelReturn, labelSpan, lowerBound, trailingReturn } from '../analysis/reaction';
 import { epsSurprise, revenueSurprise } from '../analysis/surprise';
 import { asOfQuarter, quarterMetrics } from '../analysis/fundamentals';
 import { mean } from '../util/stats';
@@ -44,6 +44,8 @@ export interface EventRow {
   day0Date: string;
   basePrice: number;
   day0Open: number;
+  /** Precio de decisión POST (cierre del día 0). */
+  day0Close: number;
   sigma: number | null;
   /** Capitalización aproximada al cierre base: acciones diluidas del último 10-Q × precio. */
   capApprox: number | null;
@@ -61,6 +63,7 @@ export interface EventRow {
     revenueEstimate: number | null;
     revenueSurprisePct: number | null;
     gap: number;
+    react0: number;
     abnormalVolume: number | null;
   };
 }
@@ -86,13 +89,16 @@ export const FEATURE_LABELS: Record<string, string> = {
   eps_beat: 'Superó / cumplió / incumplió EPS',
   rev_surprise_pct: 'Sorpresa de ingresos',
   has_rev_surprise: 'Hay consenso de ingresos verificable',
-  gap: 'Gap de apertura tras el reporte',
-  gap_z: 'Gap en desviaciones estándar',
-  gap_x_surprise: 'Gap alineado con la sorpresa',
+  react0: 'Reacción del día 0',
+  react0_abn: 'Reacción del día 0 vs. S&P 500',
+  react0_z: 'Reacción del día 0 en desviaciones estándar',
+  react0_x_surprise: 'Reacción alineada con la sorpresa',
+  intraday0: 'Cierre vs. apertura del día 0 (confirmación)',
+  abvol0: 'Volumen anormal del día 0',
 };
 
 export const PRE_FEATURES = ['hist_n', 'hist_mean_react', 'hist_abs_react', 'hist_beat_rate', 'hist_sell_news', 'runup20_rel', 'mom60_rel', 'vol60', 'spy20', 'sector20_rel', 'prev_surprise_bps', 'fund_rev_yoy', 'fund_opm_chg', 'fund_fcf_margin', 'fund_accrual', 'has_fund'];
-export const POST_FEATURES = [...PRE_FEATURES, 'eps_surprise_bps', 'eps_beat', 'rev_surprise_pct', 'has_rev_surprise', 'gap', 'gap_z', 'gap_x_surprise'];
+export const POST_FEATURES = [...PRE_FEATURES, 'eps_surprise_bps', 'eps_beat', 'rev_surprise_pct', 'has_rev_surprise', 'react0', 'react0_abn', 'react0_z', 'react0_x_surprise', 'intraday0', 'abvol0'];
 
 const clip = (x: number | null, lo: number, hi: number) => (x === null ? null : Math.max(lo, Math.min(hi, x)));
 
@@ -148,6 +154,11 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
     const eps = epsSurprise(e.epsActual.value, e.epsEstimate.value, base.close);
     const rev = revenueSurprise(e.revenueActual.value, e.revenueEstimate.value);
     const gap = day0.open / base.close - 1;
+    const react0 = day0.close / base.close - 1;
+    const spyB = lowerBound(spy, baseDate);
+    const spy0 = lowerBound(spy, day0Date);
+    const spyReact = spyB < spy.length && spy0 < spy.length && spy[spyB].time === baseDate && spy[spy0].time === day0Date ? spy[spy0].close / spy[spyB].close - 1 : null;
+    const abvol0 = abnormalVolume(bars, a.day0);
     const epsBps = clip(eps.priceScaledBps, -300, 300);
 
     const pre: FeatureVector = {
@@ -171,9 +182,12 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
       eps_beat: eps.verdict === 'BEAT' ? 1 : eps.verdict === 'MISS' ? -1 : eps.verdict === 'IN_LINE' ? 0 : null,
       rev_surprise_pct: clip(rev.pct, -0.3, 0.3),
       has_rev_surprise: rev.pct !== null ? 1 : 0,
-      gap: clip(gap, -0.5, 0.5),
-      gap_z: sigma ? clip(gap / sigma, -10, 10) : null,
-      gap_x_surprise: epsBps !== null ? Math.sign(epsBps) * clip(gap, -0.5, 0.5)! : null,
+      react0: clip(react0, -0.5, 0.5),
+      react0_abn: spyReact === null ? null : clip(react0 - spyReact, -0.5, 0.5),
+      react0_z: sigma ? clip(react0 / sigma, -12, 12) : null,
+      react0_x_surprise: epsBps !== null ? Math.sign(epsBps) * clip(react0, -0.5, 0.5)! : null,
+      intraday0: day0.open > 0 ? clip(day0.close / day0.open - 1, -0.3, 0.3) : null,
+      abvol0: clip(abvol0, 0, 15),
     };
 
     const labels: EventRow['labels'] = { PRE: {}, POST: {} };
@@ -183,7 +197,7 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
         const band = flatBand(sigma, h, roundTrip);
         if (r === null || band === null) continue;
         const rb = benchmarkReturn(spy, bars, a, h, mode);
-        labels[mode][h] = { ret: r, abnormal: rb === null ? null : r - rb, band, outcome: classify(r, band), endDate: bars[a.day0 + h - 1].time };
+        labels[mode][h] = { ret: r, abnormal: rb === null ? null : r - rb, band, outcome: classify(r, band), endDate: bars[labelSpan(a, h, mode).to].time };
       }
     }
 
@@ -198,6 +212,7 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
       day0Date,
       basePrice: base.close,
       day0Open: day0.open,
+      day0Close: day0.close,
       sigma,
       capApprox: qPre?.sharesDiluted ? qPre.sharesDiluted * base.close : null,
       marketVol20: (() => { const i = lowerBound(spy, baseDate); return i < spy.length && spy[i].time === baseDate ? dailyVol(spy, i, 20) : null; })(),
@@ -212,7 +227,8 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
         revenueEstimate: e.revenueEstimate.value,
         revenueSurprisePct: rev.pct,
         gap,
-        abnormalVolume: abnormalVolume(bars, a.day0),
+        react0,
+        abnormalVolume: abvol0,
       },
     });
   }

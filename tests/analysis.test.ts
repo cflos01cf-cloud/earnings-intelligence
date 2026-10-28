@@ -45,10 +45,10 @@ describe('alineación del reporte con las velas', () => {
   it('hora desconocida: ventana de dos sesiones', () => {
     expect(align(BARS, '2026-07-30', 'unknown')).toEqual({ base: 0, day0: 2, twoSessionWindow: true });
   });
-  it('etiquetas PRE (cierre→cierre) y POST (apertura→cierre)', () => {
+  it('etiquetas PRE (cierre base→cierre día 0) y POST (cierre día 0→cierre siguiente)', () => {
     const a = align(BARS, '2026-07-30', 'post-market')!;
     expect(labelReturn(BARS, a, 1, 'PRE')).toBeCloseTo(106 / 101 - 1);
-    expect(labelReturn(BARS, a, 1, 'POST')).toBeCloseTo(106 / 105 - 1);
+    expect(labelReturn(BARS, a, 1, 'POST')).toBeCloseTo(108 / 106 - 1);
     expect(labelReturn(BARS, a, 5, 'POST')).toBeNull(); // aún no hay velas suficientes
     expect(benchmarkReturn(BARS, BARS, a, 1, 'PRE')).toBeCloseTo(106 / 101 - 1);
   });

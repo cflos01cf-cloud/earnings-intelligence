@@ -8,9 +8,11 @@
  *                                (ventana de dos sesiones; se marca).
  * Base = cierre de la sesión previa al día 0 (o anterior al anuncio si la hora es desconocida).
  *
- * Etiquetas (h = 1, 5, 20 sesiones; la sesión 1 es el día 0):
- *   PRE  : cierre(día0+h−1) / cierre(base) − 1        — posición tomada ANTES del anuncio
- *   POST : cierre(día0+h−1) / apertura(día0) − 1      — posición tomada en la apertura tras conocer el reporte
+ * Etiquetas (h = 1, 5, 20 sesiones):
+ *   PRE  : cierre(día0+h−1) / cierre(base) − 1   — posición tomada ANTES del anuncio; h=1 es la reacción inicial.
+ *   POST : cierre(día0+h)   / cierre(día0) − 1   — posición tomada al cierre del día 0, ya conocida la reacción
+ *                                                  inicial (deriva posterior al reporte). Así lo puede ejecutar un
+ *                                                  proceso diario después del cierre, sin depender de la apertura.
  */
 import type { Bar, Horizon, Mode, ReportTime } from '../types';
 import { std } from '../util/stats';
@@ -50,25 +52,29 @@ export function align(bars: Bar[], reportDate: string, time: ReportTime): Alignm
   return { base: i - 1, day0: j, twoSessionWindow: j - (i - 1) > 1 };
 }
 
+/** Índice de la vela inicial (entrada) y final (salida) de la etiqueta. */
+export function labelSpan(a: Alignment, h: Horizon, mode: Mode): { from: number; to: number } {
+  return mode === 'PRE' ? { from: a.base, to: a.day0 + h - 1 } : { from: a.day0, to: a.day0 + h };
+}
+
 export function labelReturn(bars: Bar[], a: Alignment, h: Horizon, mode: Mode): number | null {
-  const k = a.day0 + h - 1;
-  if (k >= bars.length) return null;
-  const start = mode === 'PRE' ? bars[a.base].close : bars[a.day0].open;
+  const { from, to } = labelSpan(a, h, mode);
+  if (to >= bars.length) return null;
+  const start = bars[from].close;
   if (!(start > 0)) return null;
-  return bars[k].close / start - 1;
+  return bars[to].close / start - 1;
 }
 
 /** Rendimiento del benchmark en las MISMAS fechas (por fecha, no por índice). */
 export function benchmarkReturn(bench: Bar[], bars: Bar[], a: Alignment, h: Horizon, mode: Mode): number | null {
-  const k = a.day0 + h - 1;
-  if (k >= bars.length) return null;
-  const startDate = mode === 'PRE' ? bars[a.base].time : bars[a.day0].time;
-  const endDate = bars[k].time;
+  const { from, to } = labelSpan(a, h, mode);
+  if (to >= bars.length) return null;
+  const startDate = bars[from].time;
+  const endDate = bars[to].time;
   const si = lowerBound(bench, startDate);
   const ei = lowerBound(bench, endDate);
   if (si >= bench.length || ei >= bench.length || bench[si].time !== startDate || bench[ei].time !== endDate) return null;
-  const start = mode === 'PRE' ? bench[si].close : bench[si].open;
-  return start > 0 ? bench[ei].close / start - 1 : null;
+  return bench[si].close > 0 ? bench[ei].close / bench[si].close - 1 : null;
 }
 
 /** Volatilidad diaria (desv. est. de rendimientos cierre a cierre) en las `n` sesiones que terminan en `end` (inclusive). */

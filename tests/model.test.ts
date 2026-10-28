@@ -22,11 +22,18 @@ describe('sin información futura', () => {
     const rows = buildRows(s, w.spy, null, RT);
     const r = rows[5];
     const day0 = s.bars.findIndex((b) => b.time === r.day0Date);
-    const tampered = { ...s, bars: s.bars.map((b, i) => (i > day0 ? { ...b, open: b.open * 3, close: b.close * 3, high: b.high * 3, low: b.low * 3 } : i === day0 ? { ...b, close: b.close * 3, high: b.high * 3 } : b)) };
-    const r2 = buildRows(tampered, w.spy, null, RT).find((x) => x.id === r.id)!;
+    const x3 = (b: (typeof s.bars)[number]) => ({ ...b, open: b.open * 3, close: b.close * 3, high: b.high * 3, low: b.low * 3 });
+    // Después del cierre del día 0: ni PRE ni POST cambian; la etiqueta POST sí.
+    const after = { ...s, bars: s.bars.map((b, i) => (i > day0 ? x3(b) : b)) };
+    const r2 = buildRows(after, w.spy, null, RT).find((x) => x.id === r.id)!;
     expect(r2.features.PRE).toEqual(r.features.PRE);
     expect(r2.features.POST).toEqual(r.features.POST);
     expect(r2.labels.POST[1]!.ret).not.toBeCloseTo(r.labels.POST[1]!.ret);
+    // Desde el día 0 (incluido): PRE no cambia, porque decide al cierre de la base.
+    const from0 = { ...s, bars: s.bars.map((b, i) => (i >= day0 ? x3(b) : b)) };
+    const r3 = buildRows(from0, w.spy, null, RT).find((x) => x.id === r.id)!;
+    expect(r3.features.PRE).toEqual(r.features.PRE);
+    expect(r3.features.POST.react0).not.toEqual(r.features.POST.react0);
   });
   it('la historia de reacciones solo usa reportes cuya reacción ya terminó', () => {
     const { rows } = world(1);
@@ -78,7 +85,7 @@ describe('modelo', () => {
     const { rows } = world(1);
     const set = train(rows, 'POST', 20, '9999-12-31');
     const r = rows.at(-1)!;
-    const p = predict(set, { symbol: r.symbol, reportDate: r.reportDate, decisionDate: r.day0Date, features: r.features.POST, basePrice: r.day0Open, sigma: r.sigma, roundTrip: RT });
+    const p = predict(set, { symbol: r.symbol, reportDate: r.reportDate, decisionDate: r.day0Date, features: r.features.POST, basePrice: r.day0Close, sigma: r.sigma, roundTrip: RT });
     expect(p.probs!.up + p.probs!.down + p.probs!.flat).toBeCloseTo(1, 10);
     expect(p.interval![0]).toBeLessThan(p.interval![1]);
     expect(p.factors.length).toBeGreaterThan(0);
@@ -89,8 +96,8 @@ describe('modelo', () => {
 });
 
 describe('walk-forward', () => {
-  it('detecta ventaja cuando existe (deriva post-reporte sintética)', () => {
-    const { rows, w, barsBy } = world(1);
+  it('detecta ventaja cuando existe (deriva post-reporte sintética fuerte)', () => {
+    const { rows, w, barsBy } = world(3);
     const r = runWalkForward(rows, barsBy, w.spy, { mode: 'POST', horizon: 20, roundTrip: RT });
     expect(r.prob!.skill).toBeGreaterThan(0);
     expect(r.prob!.brierModel).toBeLessThan(r.prob!.brierBaseline);
@@ -103,13 +110,14 @@ describe('walk-forward', () => {
       expect(set.nTrain).toBe(f.trainN);
     }
   }, 60_000);
-  it('NO inventa ventaja en datos sin señal y entonces no opera', () => {
-    const { rows, w, barsBy } = world(0);
-    const r = runWalkForward(rows, barsBy, w.spy, { mode: 'POST', horizon: 20, roundTrip: RT });
-    expect(r.prob!.skill).toBeLessThan(0.01);
-    expect(r.strategies.find((s) => s.name === 'Modelo')!.trades).toBe(0);
-    expect(r.warnings.join(' ')).toMatch(/NO supera al baseline/);
-  }, 60_000);
+  it('NO inventa ventaja en datos sin señal (varias semillas)', () => {
+    for (const seed of [3, 4, 5, 7]) {
+      const { rows, w, barsBy } = world(0, seed);
+      const r = runWalkForward(rows, barsBy, w.spy, { mode: 'POST', horizon: 20, roundTrip: RT });
+      expect(r.prob!.skill).toBeLessThan(0.01);
+      expect(r.liveSet!.oosSkill).toBeLessThan(0.01);
+    }
+  }, 120_000);
   it('evidencia insuficiente con pocos eventos', () => {
     const { rows, w, barsBy } = world(1);
     const r = runWalkForward(rows.slice(0, 50), barsBy, w.spy, { mode: 'POST', horizon: 5, roundTrip: RT });

@@ -107,7 +107,7 @@ export function invalidationFor(mode: Mode, p: Probabilities, basePrice: number 
     out.push('Se publica el reporte: la predicción PRE deja de aplicar y se reemplaza por la POST.');
     out.push('Cambio de fecha u hora del reporte.');
   } else {
-    out.push(bull ? 'La acción cierra el día 0 por debajo de su apertura (el mercado no confirma).' : 'La acción cierra el día 0 por encima de su apertura (el mercado no confirma).');
+    out.push(bull ? 'La siguiente sesión cierra por debajo del mínimo del día 0 (el mercado no confirma).' : 'La siguiente sesión cierra por encima del máximo del día 0 (el mercado no confirma).');
   }
   if (basePrice && sigma) {
     const move = sigma * Math.sqrt(h) * 1.5;
