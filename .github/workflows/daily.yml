@@ -1,0 +1,37 @@
+name: Earnings Intelligence diario
+
+on:
+  schedule:
+    # 23:15 UTC de lunes a viernes = 17:15 Ciudad de México (después del cierre de NY).
+    - cron: '15 23 * * 1-5'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ei-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run ci:daily
+        env:
+          STORAGE: netlify-blobs
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_BLOBS_TOKEN: ${{ secrets.NETLIFY_BLOBS_TOKEN }}
+          SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          ALPHAVANTAGE_DAILY_LIMIT: ${{ vars.ALPHAVANTAGE_DAILY_LIMIT || '20' }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          TWELVEDATA_RATE_PER_MIN: ${{ vars.TWELVEDATA_RATE_PER_MIN || '8' }}
+          GBM_NETLIFY_SITE_ID: ${{ secrets.GBM_NETLIFY_SITE_ID }}
+          GBM_BLOBS_TOKEN: ${{ secrets.GBM_BLOBS_TOKEN }}

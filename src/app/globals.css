@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Paleta de la casa (misma que GBM Weekly Trend y Global Quant Hub). */
+:root {
+  --ink: #0f1a2a;
+  --panel: #15233a;
+  --line: #243650;
+  --fg: #e4e8ee;
+  --muted: #8c9ab0;
+  --brass: #c9a227;
+  --up: #4fbf8f;
+  --warn: #e0b24a;
+  --down: #e06a5a;
+  --info: #6aa8e0;
+  /* Series de gráficos: paleta categórica validada (CVD y contraste) sobre --panel. Orden fijo. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --flat: #7d8aa0;
+  color-scheme: dark;
+}
+
+html, body { background: var(--ink); color: var(--fg); }
+body { font-feature-settings: 'tnum' 1; -webkit-font-smoothing: antialiased; }
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.wordmark { font-stretch: 118%; font-weight: 700; letter-spacing: -0.01em; }
+table { border-collapse: collapse; }
+th { font-weight: 500; color: var(--muted); text-align: left; }
+.tbl th, .tbl td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl tbody tr:hover { background: rgba(255,255,255,0.03); }
+.bar-hit:hover .bar-mark { opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
