@@ -9,13 +9,13 @@
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "universe:sync": "tsx --env-file-if-exists=.env.local scripts/universe-sync.ts",
-    "ingest": "tsx --env-file-if-exists=.env.local scripts/ingest.ts",
-    "predict": "tsx --env-file-if-exists=.env.local scripts/predict.ts",
-    "backtest": "tsx --env-file-if-exists=.env.local scripts/backtest.ts",
-    "ci:daily": "tsx --env-file-if-exists=.env.local scripts/ci-daily.ts",
-    "probe": "tsx --env-file-if-exists=.env.local scripts/probe.ts",
-    "demo:build": "tsx scripts/demo-build.ts"
+    "universe:sync": "tsx --env-file-if-exists=.env.local scripts/universe-sync.mts",
+    "ingest": "tsx --env-file-if-exists=.env.local scripts/ingest.mts",
+    "predict": "tsx --env-file-if-exists=.env.local scripts/predict.mts",
+    "backtest": "tsx --env-file-if-exists=.env.local scripts/backtest.mts",
+    "ci:daily": "tsx --env-file-if-exists=.env.local scripts/ci-daily.mts",
+    "probe": "tsx --env-file-if-exists=.env.local scripts/probe.mts",
+    "demo:build": "tsx scripts/demo-build.mts"
   },
   "dependencies": {
     "@netlify/blobs": "^11.1.3",
