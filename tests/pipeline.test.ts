@@ -68,7 +68,7 @@ describe('ingesta', () => {
     expect(calls).toBe(4);
     const s = statuses.find((x) => x.provider === 'Alpha Vantage')!;
     expect(s.status).toBe('PARTIAL');
-    expect(s.detail).toMatch(/límite del proveedor/);
+    expect(s.detail).toMatch(/límite diario del proveedor/);
     expect((await store.get<AvRaw>(KEYS.raw('av', 'AAPL')))!.events).toHaveLength(1);
   });
   it('fusión de velas y detección de ajuste retroactivo', () => {

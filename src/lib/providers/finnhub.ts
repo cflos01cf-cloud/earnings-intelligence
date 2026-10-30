@@ -28,7 +28,9 @@ export function parseFhCalendar(j: FhCalendar, universe: Set<string>, asOf: stri
     const sym = r.symbol?.toUpperCase();
     if (!sym || !universe.has(sym) || !r.date) continue;
     const reportTime = fhReportTime(r.hour);
-    snapshots.push({
+    const past = r.date < asOf;
+    // Solo cuenta como instantánea punto-en-el-tiempo si el reporte aún no ocurre.
+    if (r.date >= asOf) snapshots.push({
       symbol: sym, asOf, reportDate: r.date, reportTime,
       ...(r.year ? { fiscalYear: r.year } : {}), ...(r.quarter ? { fiscalQuarter: r.quarter } : {}),
       epsEstimate: n(r.epsEstimate), revenueEstimate: n(r.revenueEstimate), source: 'Finnhub',
@@ -43,9 +45,9 @@ export function parseFhCalendar(j: FhCalendar, universe: Set<string>, asOf: stri
       reportTime,
       status: epsA !== null || revA !== null ? 'reported' : 'scheduled',
       epsActual: { value: epsA, prov: { ...base, publishedAt: epsA !== null ? r.date : null, verification: epsA !== null ? 'PROVIDER_ACTUAL' : 'UNAVAILABLE' } },
-      epsEstimate: { value: n(r.epsEstimate), prov: { ...base, publishedAt: asOf, verification: n(r.epsEstimate) !== null ? 'CONSENSUS' : 'UNAVAILABLE', note: `Consenso observado el ${asOf}` } },
+      epsEstimate: { value: n(r.epsEstimate), prov: { ...base, publishedAt: past ? null : asOf, verification: n(r.epsEstimate) !== null ? 'CONSENSUS' : 'UNAVAILABLE', note: past ? 'Consenso histórico según el proveedor; fecha de corte no publicada.' : `Consenso observado el ${asOf}` } },
       revenueActual: { value: revA, prov: { ...base, publishedAt: revA !== null ? r.date : null, verification: revA !== null ? 'PROVIDER_ACTUAL' : 'UNAVAILABLE' } },
-      revenueEstimate: { value: n(r.revenueEstimate), prov: { ...base, publishedAt: asOf, verification: n(r.revenueEstimate) !== null ? 'CONSENSUS' : 'UNAVAILABLE', note: `Consenso observado el ${asOf}` } },
+      revenueEstimate: { value: n(r.revenueEstimate), prov: { ...base, publishedAt: past ? null : asOf, verification: n(r.revenueEstimate) !== null ? 'CONSENSUS' : 'UNAVAILABLE', note: past ? 'Consenso histórico según el proveedor; fecha de corte no publicada.' : `Consenso observado el ${asOf}` } },
     });
   }
   return { snapshots, events };
@@ -56,8 +58,12 @@ export class FinnhubClient {
   constructor(private readonly apiKey: string, private readonly fetcher?: Fetcher) {
     if (!apiKey) throw new Error('Falta FINNHUB_API_KEY');
   }
-  async calendar(from: string, to: string) {
-    const url = `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&token=${this.apiKey}`;
+  /**
+   * Con `symbol` la respuesta se limita a esa emisora. Sin él, Finnhub corta en ~1,500 filas y se pierden
+   * reportes de la ventana (por eso la ingesta consulta por símbolo).
+   */
+  async calendar(from: string, to: string, symbol?: string) {
+    const url = `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ''}&token=${this.apiKey}`;
     const r = await getJson<FhCalendar>(url, { limiter: this.limiter, fetcher: this.fetcher });
     return { ...r, url: redact(url) };
   }

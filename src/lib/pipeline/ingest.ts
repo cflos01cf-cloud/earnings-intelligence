@@ -4,7 +4,7 @@
  */
 import type { Bar, Company, ConsensusSnapshot, EarningsEvent, PriceSeries, QuarterFundamentals } from '../types';
 import { KEYS, type JsonStore } from '../store';
-import { EdgarClient, parseCompanyFacts, parseEarningsReleases, type EarningsRelease } from '../providers/edgar';
+import { EdgarClient, formerCikCandidates, mergeCompanyFacts, parseCompanyFacts, parseEarningsReleases, sameEntity, type EarningsRelease } from '../providers/edgar';
 import { AlphaVantageClient, parseAvEarnings } from '../providers/alphavantage';
 import { FinnhubClient, parseFhCalendar } from '../providers/finnhub';
 import { TwelveDataClient } from '../providers/twelvedata';
@@ -59,13 +59,31 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
   const fh = d.clients?.fh !== undefined ? d.clients.fh : env.FINNHUB_API_KEY ? new FinnhubClient(env.FINNHUB_API_KEY) : null;
   if (!fh) statuses.push(mk('Finnhub', 'NOT_CONFIGURED', 'Falta FINNHUB_API_KEY: sin calendario ni consenso de ingresos.', 0));
   else {
-    const r = await fh.calendar(addDays(day, -10), addDays(day, 60));
-    if (r.ok && r.data?.earningsCalendar) {
+    // Una consulta por símbolo: la consulta global se trunca a ~1,500 filas.
+    const from = addDays(day, -120);
+    const to = addDays(day, 90);
+    const snapshots: ConsensusSnapshot[] = [];
+    const events: EarningsEvent[] = [];
+    const errors: string[] = [];
+    let calls = 0;
+    for (const c of scope) {
+      const r = await fh.calendar(from, to, c.symbol);
+      calls++;
+      if (!r.ok || !r.data?.earningsCalendar) {
+        errors.push(`${c.symbol}: HTTP ${r.status}`);
+        if (r.status === 401 || r.status === 403) break;
+        continue;
+      }
       const parsed = parseFhCalendar(r.data, universe, day, iso);
-      await d.store.put(KEYS.consensus(day), parsed.snapshots);
-      await d.store.put(KEYS.raw('finnhub', 'calendar'), { fetchedAt: iso, asOf: day, events: parsed.events } satisfies CalendarRaw);
-      statuses.push(mk('Finnhub', 'OK', `${parsed.events.length} reportes del universo entre ${addDays(day, -10)} y ${addDays(day, 60)}.`, 1));
-    } else statuses.push(mk('Finnhub', 'ERROR', `HTTP ${r.status} ${r.error ?? JSON.stringify(r.data ?? r.text ?? '').slice(0, 200)}`, 1));
+      snapshots.push(...parsed.snapshots);
+      events.push(...parsed.events);
+    }
+    if (events.length || !errors.length) {
+      await d.store.put(KEYS.consensus(day), snapshots);
+      await d.store.put(KEYS.raw('finnhub', 'calendar'), { fetchedAt: iso, asOf: day, events } satisfies CalendarRaw);
+    }
+    const status = errors.length ? (events.length ? 'PARTIAL' : 'ERROR') : 'OK';
+    statuses.push(mk('Finnhub', status, `${events.length} reportes del universo entre ${from} y ${to}.${errors.length ? ` Problemas: ${errors.slice(0, 5).join('; ')}` : ''}`, calls));
   }
   const cal = await d.store.get<CalendarRaw>(KEYS.raw('finnhub', 'calendar'));
 
@@ -101,11 +119,32 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
           errors.push(`${c.symbol}: companyfacts HTTP ${facts.status}`);
           continue;
         }
-        const quarters = parseCompanyFacts(facts.data, c.symbol, iso);
-        const releases = subs.ok && subs.data ? parseEarningsReleases(subs.data, c.cik!) : raw?.releases ?? [];
+        let cf = facts.data;
+        let extra = '';
+        let oldCik: string | null = null;
+        // Pocos trimestres: posible cambio de CIK. Se busca la historia bajo el CIK anterior (misma entidad).
+        if (parseCompanyFacts(cf, c.symbol, iso).length < 8) {
+          for (const old of formerCikCandidates(cf, c.cik!)) {
+            const f2 = await edgar.companyFacts(old);
+            calls++;
+            if (f2.ok && f2.data && sameEntity(f2.data.entityName, cf.entityName)) {
+              cf = mergeCompanyFacts(cf, f2.data);
+              extra = ` (incluye historia del CIK anterior ${old})`;
+              oldCik = old;
+              break;
+            }
+          }
+        }
+        const quarters = parseCompanyFacts(cf, c.symbol, iso);
+        let releases = subs.ok && subs.data ? parseEarningsReleases(subs.data, c.cik!) : raw?.releases ?? [];
+        if (oldCik) {
+          const s2 = await edgar.submissions(oldCik);
+          calls++;
+          if (s2.ok && s2.data) releases = [...parseEarningsReleases(s2.data, oldCik), ...releases].sort((a, b) => a.date.localeCompare(b.date));
+        }
         await d.store.put(KEYS.raw('edgar', c.symbol), { fetchedAt: iso, cik: c.cik!, quarters, releases } satisfies EdgarRaw);
         refreshed++;
-        log(`EDGAR ${c.symbol}: ${quarters.length} trimestres, ${releases.length} comunicados 8-K 2.02`);
+        log(`EDGAR ${c.symbol}: ${quarters.length} trimestres, ${releases.length} comunicados 8-K 2.02${extra}`);
       }
       statuses.push(mk('SEC EDGAR', errors.length ? 'PARTIAL' : 'OK', `${refreshed} empresas actualizadas.${errors.length ? ` Problemas: ${errors.slice(0, 5).join('; ')}` : ''}`, calls));
     } catch (e) {
@@ -143,11 +182,16 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
         break;
       }
       const r = await av.earnings(c.symbol);
-      calls++;
-      budget.alphavantage++;
+      calls += r.calls;
+      budget.alphavantage += r.calls;
       if (r.status === 'RATE_LIMITED') {
-        stopReason = `límite del proveedor: ${r.message?.slice(0, 120)}`;
-        budget.alphavantage = limit;
+        // Cuota diaria del proveedor agotada: no se insiste hoy.
+        stopReason = `límite diario del proveedor: ${r.message?.slice(0, 120)}`;
+        budget.alphavantage = Math.max(budget.alphavantage, limit);
+        break;
+      }
+      if (r.status === 'BURST') {
+        stopReason = `el proveedor pidió espaciar las consultas y no se recuperó tras reintentar: ${r.message?.slice(0, 120)}`;
         break;
       }
       if (r.status !== 'OK' || !r.data) {

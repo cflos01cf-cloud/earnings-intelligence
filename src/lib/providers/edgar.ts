@@ -175,6 +175,46 @@ export function parseCompanyFacts(cf: CompanyFacts, symbol: string, fetchedAt: s
   return out;
 }
 
+// ───────────── Cambio de CIK (reorganizaciones, nuevas sociedades controladoras) ─────────────
+
+/**
+ * CIKs anteriores de la misma emisora. Se detectan por el prefijo de los números de acceso de sus
+ * presentaciones (la emisora presenta bajo su CIK viejo hasta reorganizarse). Un agente de presentación
+ * también aparece como prefijo, por eso el llamador debe confirmar que el nombre de la entidad coincide.
+ */
+export function formerCikCandidates(cf: CompanyFacts, cik: string): string[] {
+  const own = Number(cik);
+  const prefixes = new Map<number, number>();
+  for (const concept of Object.values(cf.facts?.['us-gaap'] ?? {})) {
+    for (const facts of Object.values(concept.units ?? {})) {
+      for (const f of facts) {
+        const p = f.accn ? Number(f.accn.split('-')[0]) : NaN;
+        if (Number.isFinite(p) && p !== own) prefixes.set(p, (prefixes.get(p) ?? 0) + 1);
+      }
+    }
+  }
+  return [...prefixes].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([p]) => String(p).padStart(10, '0'));
+}
+
+/** Misma entidad si comparten la primera palabra significativa del nombre ("Exxon Mobil Corp" ~ "EXXON MOBIL CORP /NJ/"). */
+export function sameEntity(a: string | undefined, b: string | undefined): boolean {
+  const key = (s?: string) => (s ?? '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !['THE', 'INC', 'CORP', 'CO', 'LTD', 'HOLDINGS', 'GROUP'].includes(w))[0];
+  const ka = key(a);
+  return !!ka && ka === key(b);
+}
+
+/** Une hechos de dos CIKs: para cada concepto se juntan las listas; `firstFiled` resuelve duplicados. */
+export function mergeCompanyFacts(primary: CompanyFacts, former: CompanyFacts): CompanyFacts {
+  const out: CompanyFacts = { ...primary, facts: { ...primary.facts, 'us-gaap': { ...(primary.facts?.['us-gaap'] ?? {}) } } };
+  const g = out.facts!['us-gaap'];
+  for (const [name, concept] of Object.entries(former.facts?.['us-gaap'] ?? {})) {
+    const units = { ...(g[name]?.units ?? {}) };
+    for (const [u, facts] of Object.entries(concept.units ?? {})) units[u] = [...(units[u] ?? []), ...facts];
+    g[name] = { units };
+  }
+  return out;
+}
+
 // ───────────── 8-K Item 2.02: fecha y hora oficial del comunicado de resultados ─────────────
 
 export interface Submissions { filings?: { recent?: { form: string[]; items: string[]; acceptanceDateTime: string[]; filingDate: string[]; accessionNumber: string[]; primaryDocument: string[] } } }

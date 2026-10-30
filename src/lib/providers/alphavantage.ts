@@ -30,11 +30,17 @@ export function avReportTime(s: string | undefined): ReportTime {
   return 'unknown';
 }
 
-export type AvStatus = 'OK' | 'RATE_LIMITED' | 'INVALID_SYMBOL' | 'ERROR';
+/** BURST = pediste más de 1 por segundo (se espera y se reintenta). RATE_LIMITED = cuota del día agotada. */
+export type AvStatus = 'OK' | 'BURST' | 'RATE_LIMITED' | 'INVALID_SYMBOL' | 'ERROR';
 
 export function avStatus(j: AvEarnings | null): { status: AvStatus; message?: string } {
   if (!j) return { status: 'ERROR', message: 'Respuesta vacía o no JSON' };
-  if (j.Information || j.Note) return { status: 'RATE_LIMITED', message: j.Information ?? j.Note };
+  const info = j.Information ?? j.Note;
+  if (info) {
+    // "Please consider spreading out your free API requests more sparingly (1 request per second)" ≠ cuota diaria.
+    if (/per second|spreading out|sparingly/i.test(info) && !/per day|daily/i.test(info)) return { status: 'BURST', message: info };
+    return { status: 'RATE_LIMITED', message: info };
+  }
   if (j['Error Message']) return { status: 'INVALID_SYMBOL', message: j['Error Message'] };
   if (!Array.isArray(j.quarterlyEarnings)) return { status: 'ERROR', message: 'Sin quarterlyEarnings' };
   return { status: 'OK' };
@@ -65,14 +71,34 @@ export function parseAvEarnings(j: AvEarnings, symbol: string, fetchedAt: string
 
 export class AlphaVantageClient {
   private readonly limiter: RateLimiter;
-  constructor(private readonly apiKey: string, perMinute = 5, private readonly fetcher?: Fetcher) {
+  /**
+   * El plan gratuito exige ≤ 1 petición por segundo además de la cuota diaria. Una ventana de 60 s con
+   * N permitidas deja pasar N seguidas, así que se usa una ventana corta: 1 petición cada `minGapMs`.
+   */
+  constructor(
+    private readonly apiKey: string,
+    perMinute = 5,
+    private readonly fetcher?: Fetcher,
+    private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    private readonly burstWaitMs = 15_000,
+  ) {
     if (!apiKey) throw new Error('Falta ALPHAVANTAGE_API_KEY');
-    this.limiter = new RateLimiter(perMinute);
+    const minGapMs = Math.max(1500, Math.ceil(60_000 / Math.max(1, perMinute)));
+    this.limiter = new RateLimiter(1, minGapMs);
   }
-  async earnings(symbol: string): Promise<{ status: AvStatus; message?: string; data: AvEarnings | null; url: string }> {
+  /** Una consulta lógica; ante BURST espera y reintenta (hasta 2 veces). `calls` = peticiones reales hechas. */
+  async earnings(symbol: string): Promise<{ status: AvStatus; message?: string; data: AvEarnings | null; url: string; calls: number }> {
     const url = `https://www.alphavantage.co/query?function=EARNINGS&symbol=${encodeURIComponent(providerSymbol(symbol, 'alphavantage'))}&apikey=${this.apiKey}`;
-    const r = await getJson<AvEarnings>(url, { limiter: this.limiter, fetcher: this.fetcher, retries: 1 });
-    const s = r.ok ? avStatus(r.data) : { status: 'ERROR' as const, message: `HTTP ${r.status} ${r.error ?? ''}` };
-    return { ...s, data: r.data, url: redact(url) };
+    let calls = 0;
+    for (let attempt = 0; ; attempt++) {
+      const r = await getJson<AvEarnings>(url, { limiter: this.limiter, fetcher: this.fetcher, retries: 1 });
+      calls++;
+      const s = r.ok ? avStatus(r.data) : { status: 'ERROR' as const, message: `HTTP ${r.status} ${r.error ?? ''}` };
+      if (s.status === 'BURST' && attempt < 2) {
+        await this.sleep(this.burstWaitMs);
+        continue;
+      }
+      return { ...s, data: r.data, url: redact(url), calls };
+    }
   }
 }
