@@ -66,6 +66,7 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
     const events: EarningsEvent[] = [];
     const errors: string[] = [];
     let calls = 0;
+    log(`Finnhub: calendario de ${scope.length} empresas…`);
     for (const c of scope) {
       const r = await fh.calendar(from, to, c.symbol);
       calls++;
@@ -173,6 +174,7 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
       else if (age > 30) queue.push({ c, prio: 2 + age / 1000 });
     }
     queue.sort((a, b) => a.prio - b.prio);
+    log(`Alpha Vantage: ${queue.length} empresas en cola, máximo ${limit} consultas hoy (una cada ~12 s)…`);
     let calls = 0;
     let ok = 0;
     let stopReason = '';
@@ -198,8 +200,10 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
         log(`Alpha Vantage ${c.symbol}: ${r.status} ${r.message ?? ''}`);
         continue;
       }
-      await d.store.put(KEYS.raw('av', c.symbol), { fetchedAt: iso, events: parseAvEarnings(r.data, c.symbol, iso) } satisfies AvRaw);
+      const evs = parseAvEarnings(r.data, c.symbol, iso);
+      await d.store.put(KEYS.raw('av', c.symbol), { fetchedAt: iso, events: evs } satisfies AvRaw);
       ok++;
+      log(`Alpha Vantage ${c.symbol}: ${evs.length} reportes (${budget.alphavantage}/${limit} hoy)`);
     }
     await d.store.put(KEYS.budget, budget);
     const pending = queue.length - ok;
@@ -211,6 +215,7 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
   if (!td) statuses.push(mk('TwelveData', 'NOT_CONFIGURED', 'Falta TWELVEDATA_API_KEY: sin precios no hay reacciones ni predicciones.', 0));
   else {
     const symbols = [...new Set([MARKET_BENCHMARK, ...scope.map((c) => c.symbol), ...scope.map((c) => c.sectorEtf).filter((x): x is string => !!x)])];
+    log(`TwelveData: ${symbols.length} series de precios (máximo ${Number(env.TWELVEDATA_RATE_PER_MIN || 8)} por minuto)…`);
     let calls = 0;
     const errors: string[] = [];
     let updated = 0;
@@ -235,6 +240,7 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
       }
       await d.store.put(KEYS.raw('prices', s), series);
       updated++;
+      log(`TwelveData ${s}: ${series.bars.length} velas, última ${series.bars.at(-1)?.time} (${updated}/${symbols.length})`);
     }
     statuses.push(mk('TwelveData', errors.length ? (updated ? 'PARTIAL' : 'ERROR') : 'OK', `${updated} series actualizadas de ${symbols.length}.${errors.length ? ` Problemas: ${errors.slice(0, 5).join('; ')}` : ''}`, calls));
   }
