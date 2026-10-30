@@ -221,7 +221,7 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
     let updated = 0;
     for (const s of symbols) {
       const prevS = await d.store.get<PriceSeries>(KEYS.raw('prices', s));
-      if (prevS && prevS.prov.fetchedAt.slice(0, 10) === day) continue;
+      if (prevS && pricesFresh(prevS.prov.fetchedAt, now)) continue;
       const r = await td.daily(s, prevS ? 40 : 5000);
       calls++;
       if (r.status !== 'OK' || !('series' in r) || !r.series) {
@@ -247,6 +247,16 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
 
   await d.store.put('meta/providers', statuses);
   return { statuses, registry };
+}
+
+/**
+ * ¿La serie ya incluye el último cierre de Nueva York? Solo si se descargó el mismo día UTC y después de las
+ * 21:00 UTC (el cierre de las 16:00 NY es a las 20:00 UTC en verano y 21:00 en invierno). Una descarga de la
+ * noche anterior en México (p. ej. 02:48 UTC) tiene la misma fecha UTC pero NO tiene el cierre del día.
+ */
+export function pricesFresh(fetchedAt: string, now: Date): boolean {
+  const f = new Date(fetchedAt);
+  return f.toISOString().slice(0, 10) === now.toISOString().slice(0, 10) && f.getUTCHours() >= 21;
 }
 
 /** Une velas nuevas con las guardadas. Si en el traslape los cierres difieren > 0.5%, pide la serie completa. */

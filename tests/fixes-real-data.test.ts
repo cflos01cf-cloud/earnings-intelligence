@@ -87,3 +87,16 @@ describe('EDGAR: cambio de CIK', () => {
     expect(qs[1].filed).toBe('2025-08-04');
   });
 });
+
+import { pricesFresh } from '@/lib/pipeline/ingest';
+describe('TwelveData: frescura de precios', () => {
+  it('la descarga de anoche (misma fecha UTC, antes del cierre) no cuenta como fresca', () => {
+    expect(pricesFresh('2026-10-30T02:48:00Z', new Date('2026-10-30T23:06:00Z'))).toBe(false);
+  });
+  it('una descarga después del cierre del mismo día sí', () => {
+    expect(pricesFresh('2026-10-30T23:10:00Z', new Date('2026-10-30T23:40:00Z'))).toBe(true);
+  });
+  it('una descarga de ayer nunca', () => {
+    expect(pricesFresh('2026-10-29T23:10:00Z', new Date('2026-10-30T23:40:00Z'))).toBe(false);
+  });
+});
