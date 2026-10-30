@@ -65,7 +65,8 @@ export async function appendPredictions(store: JsonStore, preds: Prediction[], o
       continue;
     }
     const known = o.labelKnownAt?.(p) ?? null;
-    if (known !== null && known <= now.slice(0, 10)) {
+    // `known` puede ser fecha (YYYY-MM-DD) o instante ISO; se compara con la misma precisión.
+    if (known !== null && (known.includes('T') ? known <= now : known <= now.slice(0, 10))) {
       rejectedLate.push(p.id);
       continue;
     }
@@ -88,6 +89,20 @@ export async function readLedger(store: JsonStore): Promise<LedgerEntry[]> {
   const out: LedgerEntry[] = [];
   for (const m of head.months) out.push(...((await store.get<LedgerEntry[]>(KEYS.ledgerMonth(m))) ?? []));
   return out.sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * Instante (UTC, conservador) desde el cual el resultado de una predicción empieza a ser conocible:
+ *  - PRE: la publicación del reporte (11:00 UTC si es antes de la apertura u hora desconocida; 20:00 UTC si es después del cierre).
+ *  - POST: el cierre de la sesión siguiente al día 0 (20:00 UTC = 16:00 NY en horario de verano; se usa la hora más temprana).
+ * Una predicción registrada en o después de ese instante no prueba nada aunque sus datos fueran viejos.
+ */
+export function outcomeKnowableAt(p: Pick<Prediction, 'mode' | 'reportDate' | 'decisionDate'>, reportTime?: string): string {
+  if (p.mode === 'PRE') return `${p.reportDate}T${reportTime === 'post-market' ? '20' : '11'}:00:00.000Z`;
+  const x = new Date(`${p.decisionDate}T00:00:00Z`);
+  do x.setUTCDate(x.getUTCDate() + 1);
+  while (x.getUTCDay() === 0 || x.getUTCDay() === 6);
+  return `${x.toISOString().slice(0, 10)}T20:00:00.000Z`;
 }
 
 export function verifyChain(entries: LedgerEntry[]): { ok: boolean; brokenAt: number | null } {

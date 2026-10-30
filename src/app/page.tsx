@@ -106,7 +106,7 @@ export default async function Executive() {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Kpi label="Habilidad POST 5 sesiones" value={bt?.prob ? signed(bt.prob.skill, 2) : '—'} sub="vs. baseline de frecuencias (log loss)" tone={bt?.prob ? (bt.prob.skill > 0.005 ? 'up' : 'warn') : undefined} />
           <Kpi label="Modelo: esperanza por operación" value={model?.expectancy != null ? signed(model.expectancy, 2) : '—'} sub={model ? `${model.trades} operaciones, neto de costos` : ''} />
-          <Kpi label="Predicciones en bitácora" value={snap.live.predictions} sub={`${snap.live.resolved} resueltas · cadena ${snap.live.chainOk ? 'íntegra' : 'ROTA'}`} tone={snap.live.chainOk ? undefined : 'down'} />
+          <Kpi label="Predicciones en bitácora" value={snap.live.predictions} sub={`${snap.live.resolved} resueltas válidas${snap.live.excludedLate ? ` · ${snap.live.excludedLate} excluidas (registradas tarde)` : ''} · cadena ${snap.live.chainOk ? 'íntegra' : 'ROTA'}`} tone={snap.live.chainOk ? undefined : 'down'} />
           <Kpi label="Acierto en vivo" value={pct(snap.live.hitRate, 0)} sub={snap.live.brier != null ? `Brier ${snap.live.brier.toFixed(3)}` : 'aún sin resultados'} />
         </div>
       </Section>

@@ -100,3 +100,28 @@ describe('TwelveData: frescura de precios', () => {
     expect(pricesFresh('2026-10-29T23:10:00Z', new Date('2026-10-30T23:40:00Z'))).toBe(false);
   });
 });
+
+import { appendPredictions, outcomeKnowableAt } from '@/lib/ledger';
+import type { Prediction } from '@/lib/types';
+describe('Bitácora: no registrar predicciones cuyo resultado ya era conocible', () => {
+  const p = (over: Partial<Prediction>): Prediction => ({
+    id: 'MSFT:2026-10-28:POST:1', symbol: 'MSFT', reportDate: '2026-10-28', mode: 'POST', horizon: 1, createdAt: '', decisionDate: '2026-10-29', referencePrice: 1,
+    model: 'baseline', modelVersion: 'ei-v1', probs: { up: 0.4, down: 0.3, flat: 0.3 }, flatBand: 0.01, expectedReturn: 0, interval: null, confidence: 'BAJA', factors: [], invalidation: [], ...over,
+  });
+  it('POST: conocible al cierre de la sesión siguiente al día 0 (salta el fin de semana)', () => {
+    expect(outcomeKnowableAt(p({}))).toBe('2026-10-30T20:00:00.000Z');
+    expect(outcomeKnowableAt(p({ decisionDate: '2026-10-30' }))).toBe('2026-11-02T20:00:00.000Z');
+  });
+  it('PRE: conocible al publicarse el reporte', () => {
+    expect(outcomeKnowableAt(p({ mode: 'PRE' }), 'post-market')).toBe('2026-10-28T20:00:00.000Z');
+    expect(outcomeKnowableAt(p({ mode: 'PRE' }), 'pre-market')).toBe('2026-10-28T11:00:00.000Z');
+  });
+  it('caso real del 30-oct: precios del 29 registrados a las 23:14 UTC del 30 → rechazada', async () => {
+    const r = await appendPredictions(memoryStore(), [p({})], { now: '2026-10-30T23:14:19.000Z', labelKnownAt: (x) => outcomeKnowableAt(x) });
+    expect(r.rejectedLate).toEqual(['MSFT:2026-10-28:POST:1']);
+  });
+  it('misma predicción hecha la noche del día 0 → aceptada', async () => {
+    const r = await appendPredictions(memoryStore(), [p({})], { now: '2026-10-29T23:14:19.000Z', labelKnownAt: (x) => outcomeKnowableAt(x) });
+    expect(r.added).toBe(1);
+  });
+});

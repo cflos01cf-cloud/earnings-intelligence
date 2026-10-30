@@ -102,6 +102,8 @@ export interface LiveTrack {
   hitRate: number | null;
   brier: number | null;
   chainOk: boolean;
+  /** Resueltas pero registradas cuando su resultado ya era conocible: no cuentan en el historial. */
+  excludedLate?: number;
   byConfidence: { confidence: string; n: number; hitRate: number | null }[];
 }
 

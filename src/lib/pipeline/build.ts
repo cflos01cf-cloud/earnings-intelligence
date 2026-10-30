@@ -14,7 +14,7 @@ import { predict, train, type TrainedSet } from '../model/engine';
 import { runWalkForward, type WalkForwardResult } from '../backtest/walkforward';
 import { fitScore, scoreOf, scoreWalkForward } from '../score/earnings-score';
 import { avgDollarVolume, decide } from '../decision/engine';
-import { appendPredictions, readLedger, recordOutcomes, verifyChain, type ResolvedOutcome } from '../ledger';
+import { appendPredictions, outcomeKnowableAt, readLedger, recordOutcomes, verifyChain, type ResolvedOutcome } from '../ledger';
 import { brier } from '../model/logistic';
 import { MODEL_VERSION } from '../config';
 import { inScope } from '../universe/registry';
@@ -197,7 +197,8 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
           predictions.push(p);
           if (sessionsSince === 0) {
             newPreds.push(p);
-            knownAt.set(p.id, null); // el resultado de h ≥ 1 aún no existe: la vela de mañana no ha ocurrido
+            // Si los precios están atrasados, la sesión siguiente al día 0 puede haber cerrado ya: se rechaza.
+            knownAt.set(p.id, outcomeKnowableAt(p));
           }
           signals.push(decide({ company: c, prediction: p, reportTime: lastEv.reportTime, basePrice: lastRow.day0Close, baseTime: lastRow.day0Date, sigma: lastRow.sigma, avgDollarVolume20: dv, typicalMove: lastRow.features.PRE.hist_abs_react, roundTrip: o.roundTrip, oosSkill: set.oosSkill }));
         }
@@ -218,7 +219,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
           // A la bitácora solo la última predicción antes del anuncio (la corrida de la víspera).
           if (nextWeekday(lastBarDate) >= upcomingEv.reportDate) {
             newPreds.push(p);
-            knownAt.set(p.id, upcomingEv.reportDate);
+            knownAt.set(p.id, outcomeKnowableAt(p, upcomingEv.reportTime));
           }
           signals.push(decide({ company: c, prediction: p, reportTime: upcomingEv.reportTime, basePrice: f.basePrice, baseTime: f.baseDate, sigma: f.sigma, avgDollarVolume20: dv, typicalMove: f.features.hist_abs_react, roundTrip: o.roundTrip, oosSkill: set.oosSkill }));
         }
@@ -274,7 +275,11 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
   }
   if (!o.dryRun && outcomes.length) await recordOutcomes(o.store, outcomes);
   const outBy = new Map(outcomes.map((x) => [x.id, x]));
-  const resolved = ledger.filter((e) => outBy.has(e.prediction.id) && e.prediction.probs);
+  // Registros hechos cuando el resultado ya era conocible (p. ej. con precios atrasados): se conservan en la
+  // bitácora (nunca se reescribe), pero NO cuentan en el historial en vivo.
+  const late = (e: (typeof ledger)[number]) => e.recordedAt >= outcomeKnowableAt(e.prediction);
+  const excludedLate = ledger.filter((e) => outBy.has(e.prediction.id) && e.prediction.probs && late(e)).length;
+  const resolved = ledger.filter((e) => outBy.has(e.prediction.id) && e.prediction.probs && !late(e));
   const argmax = (p: Prediction) => (p.probs!.up >= p.probs!.down && p.probs!.up >= p.probs!.flat ? 'UP' : p.probs!.down >= p.probs!.flat ? 'DOWN' : 'FLAT');
   const hit = (e: (typeof ledger)[number]) => argmax(e.prediction) === outBy.get(e.prediction.id)!.outcome;
   const confs = ['ALTA', 'MEDIA', 'BAJA'];
@@ -373,6 +378,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
       hitRate: resolved.length ? resolved.filter(hit).length / resolved.length : null,
       brier: resolved.length ? mean(resolved.map((e) => brier(e.prediction.probs!, outBy.get(e.prediction.id)!.outcome))) : null,
       chainOk: verifyChain(ledger).ok,
+      excludedLate,
       byConfidence: confs.map((cf) => {
         const xs = resolved.filter((e) => e.prediction.confidence === cf);
         return { confidence: cf, n: xs.length, hitRate: xs.length ? xs.filter(hit).length / xs.length : null };
@@ -381,7 +387,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
     alerts,
     warnings,
   };
-  log(`Bitácora: +${ledgerInfo.added} predicciones, ${outcomes.length} resueltas`);
+  log(`Bitácora: +${ledgerInfo.added} predicciones${ledgerInfo.rejectedLate.length ? `, ${ledgerInfo.rejectedLate.length} rechazadas (su resultado ya era conocible)` : ''}; ${resolved.length} resueltas válidas${excludedLate ? `, ${excludedLate} excluidas del historial por registro tardío` : ''}`);
   return { snapshot, walkForward: wf, rows };
 }
 
