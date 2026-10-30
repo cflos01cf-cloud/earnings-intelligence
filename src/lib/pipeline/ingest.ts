@@ -44,6 +44,24 @@ function prevStatus(prev: ProviderStatus[] | null, p: ProviderName): string | nu
   return prev?.find((x) => x.provider === p)?.lastSuccess ?? null;
 }
 
+/**
+ * Símbolos "activos": con un reporte entre 45 días atrás y 35 adelante. Son los únicos que necesitan datos
+ * diarios (predicción antes del reporte, después del reporte y resolución de resultados a 20 sesiones).
+ */
+export function activeSymbols(cal: CalendarRaw | null, day: string): Set<string> {
+  const lo = addDays(day, -45);
+  const hi = addDays(day, 35);
+  return new Set((cal?.events ?? []).filter((e) => e.reportDate >= lo && e.reportDate <= hi).map((e) => e.symbol));
+}
+
+/** ¿Toca descargar precios hoy? Activos, benchmarks y tus posiciones: a diario. El resto: si tiene ≥ 6 días. */
+export function pricesDue(prev: PriceSeries | null, now: Date, daily: boolean): boolean {
+  if (!prev) return true;
+  if (pricesFresh(prev.prov.fetchedAt, now)) return false;
+  if (daily) return true;
+  return now.getTime() - Date.parse(prev.prov.fetchedAt) >= 6 * DAY;
+}
+
 export async function ingest(registry: UniverseRegistry, scope: Company[], d: IngestDeps): Promise<{ statuses: ProviderStatus[]; registry: UniverseRegistry }> {
   const now = d.now ?? new Date();
   const iso = now.toISOString();
@@ -113,7 +131,8 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
         const raw = await d.store.get<EdgarRaw>(KEYS.raw('edgar', c.symbol));
         const age = raw ? (now.getTime() - Date.parse(raw.fetchedAt)) / DAY : Infinity;
         const recentReport = (cal?.events ?? []).some((e) => e.symbol === c.symbol && e.reportDate <= day && e.reportDate >= addDays(day, -50));
-        if (!(age >= 7 || (recentReport && age >= 1))) continue;
+        // companyfacts pesa varios MB: se refresca al haber reporte reciente o cada 30 días.
+        if (!(age >= 30 || (recentReport && age >= 1))) continue;
         const [facts, subs] = [await edgar.companyFacts(c.cik!), await edgar.submissions(c.cik!)];
         calls += 2;
         if (!facts.ok || !facts.data) {
@@ -161,17 +180,19 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
     const b0 = await d.store.get<Budget>(KEYS.budget);
     const budget: Budget = b0?.date === day ? b0 : { date: day, alphavantage: 0 };
     const queue: { c: Company; prio: number }[] = [];
+    const active = activeSymbols(cal, day);
     for (const c of scope) {
       const raw = await d.store.get<AvRaw>(KEYS.raw('av', c.symbol));
       if (!raw) {
-        queue.push({ c, prio: 0 });
+        // Primero las que reportan pronto o acaban de reportar: son las que hoy pueden tener predicción.
+        queue.push({ c, prio: active.has(c.symbol) ? 0 : 0.5 });
         continue;
       }
       const last = raw.fetchedAt.slice(0, 10);
       const reportedSince = (cal?.events ?? []).some((e) => e.symbol === c.symbol && e.reportDate >= last && e.reportDate < day);
       const age = (now.getTime() - Date.parse(raw.fetchedAt)) / DAY;
       if (reportedSince) queue.push({ c, prio: 1 });
-      else if (age > 30) queue.push({ c, prio: 2 + age / 1000 });
+      else if (age > 90) queue.push({ c, prio: 2 + age / 1000 });
     }
     queue.sort((a, b) => a.prio - b.prio);
     log(`Alpha Vantage: ${queue.length} empresas en cola, máximo ${limit} consultas hoy (una cada ~12 s)…`);
@@ -214,14 +235,28 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
   const td = d.clients?.td !== undefined ? d.clients.td : env.TWELVEDATA_API_KEY ? new TwelveDataClient(env.TWELVEDATA_API_KEY, Number(env.TWELVEDATA_RATE_PER_MIN || 8)) : null;
   if (!td) statuses.push(mk('TwelveData', 'NOT_CONFIGURED', 'Falta TWELVEDATA_API_KEY: sin precios no hay reacciones ni predicciones.', 0));
   else {
-    const symbols = [...new Set([MARKET_BENCHMARK, ...scope.map((c) => c.symbol), ...scope.map((c) => c.sectorEtf).filter((x): x is string => !!x)])];
-    log(`TwelveData: ${symbols.length} series de precios (máximo ${Number(env.TWELVEDATA_RATE_PER_MIN || 8)} por minuto)…`);
+    const etfs = scope.map((c) => c.sectorEtf).filter((x): x is string => !!x);
+    const symbols = [...new Set([MARKET_BENCHMARK, ...etfs, ...scope.map((c) => c.symbol)])];
+    const active = activeSymbols(cal, day);
+    const dailySet = new Set<string>([MARKET_BENCHMARK, ...etfs, ...active, ...scope.filter((c) => c.origins.some((o) => o === 'gbm-portfolio' || o === 'gbm-watchlist')).map((c) => c.symbol)]);
+    const maxCalls = Number(env.TWELVEDATA_MAX_PER_RUN || 400); // el plan gratuito da 800 créditos al día
+    const due: { s: string; prev: PriceSeries | null }[] = [];
+    for (const s of symbols) {
+      const prevS = await d.store.get<PriceSeries>(KEYS.raw('prices', s));
+      if (pricesDue(prevS, now, dailySet.has(s))) due.push({ s, prev: prevS });
+    }
+    // Primero lo diario (benchmarks, activos, posiciones), luego lo que nunca se ha descargado, luego lo semanal.
+    due.sort((a, b) => Number(!dailySet.has(a.s)) - Number(!dailySet.has(b.s)) || Number(!!a.prev) - Number(!!b.prev));
+    log(`TwelveData: ${due.length} de ${symbols.length} series por actualizar (${[...dailySet].filter((x) => symbols.includes(x)).length} diarias; máximo ${Number(env.TWELVEDATA_RATE_PER_MIN || 8)} por minuto)…`);
     let calls = 0;
     const errors: string[] = [];
     let updated = 0;
-    for (const s of symbols) {
-      const prevS = await d.store.get<PriceSeries>(KEYS.raw('prices', s));
-      if (prevS && pricesFresh(prevS.prov.fetchedAt, now)) continue;
+    let deferred = 0;
+    for (const { s, prev: prevS } of due) {
+      if (calls >= maxCalls) {
+        deferred = due.length - updated - errors.length;
+        break;
+      }
       const r = await td.daily(s, prevS ? 40 : 5000);
       calls++;
       if (r.status !== 'OK' || !('series' in r) || !r.series) {
@@ -240,9 +275,10 @@ export async function ingest(registry: UniverseRegistry, scope: Company[], d: In
       }
       await d.store.put(KEYS.raw('prices', s), series);
       updated++;
-      log(`TwelveData ${s}: ${series.bars.length} velas, última ${series.bars.at(-1)?.time} (${updated}/${symbols.length})`);
+      log(`TwelveData ${s}: ${series.bars.length} velas, última ${series.bars.at(-1)?.time} (${updated}/${due.length})`);
     }
-    statuses.push(mk('TwelveData', errors.length ? (updated ? 'PARTIAL' : 'ERROR') : 'OK', `${updated} series actualizadas de ${symbols.length}.${errors.length ? ` Problemas: ${errors.slice(0, 5).join('; ')}` : ''}`, calls));
+    const st = errors.length || deferred ? (updated ? 'PARTIAL' : 'ERROR') : 'OK';
+    statuses.push(mk('TwelveData', st, `${updated} series actualizadas (${due.length} pendientes de ${symbols.length}).${deferred ? ` ${deferred} quedan para mañana (tope de ${maxCalls} consultas por corrida).` : ''}${errors.length ? ` Problemas: ${errors.slice(0, 5).join('; ')}` : ''}`, calls));
   }
 
   await d.store.put('meta/providers', statuses);

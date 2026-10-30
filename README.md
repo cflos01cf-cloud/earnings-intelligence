@@ -1,7 +1,7 @@
 # Earnings Intelligence
 
 Quinto motor del Global Quant Hub: analiza los resultados trimestrales de las empresas que ya sigues
-(universo de GBM Weekly Trend + tus posiciones y watchlist) y estima la probabilidad de que la acción
+(universo de GBM Weekly Trend + tus posiciones y watchlist) y de ~168 acciones medianas de EE.UU. y estima la probabilidad de que la acción
 suba, baje o se mueva lateral a 1, 5 y 20 sesiones — **solo cuando el modelo demostró ventaja fuera de muestra**.
 
 > Herramienta analítica. No es asesoría financiera. Las probabilidades son salidas de un modelo, no hechos.
@@ -73,8 +73,10 @@ Sin llaves, para ver la app con datos **sintéticos**: `npm run demo:build` y `D
 | `TWELVEDATA_API_KEY` | precios diarios | twelvedata.com (gratis) |
 | `GBM_NETLIFY_SITE_ID`, `GBM_BLOBS_TOKEN` | leer universo y posiciones de GBM | los mismos que usa el hub |
 
-La primera corrida completa tarda: Alpha Vantage gratuito da ~25 peticiones al día, así que la historia
-de EPS de las 35 empresas se completa en **2 días** (la app lo muestra como PARCIAL mientras tanto).
+La primera corrida con el universo ampliado tarda ~45 minutos (sobre todo los ~170 historiales de precios a
+8 por minuto). Después, cada día solo se actualiza lo necesario: benchmarks, empresas con reporte cercano y tus
+posiciones; el resto, una vez por semana. Alpha Vantage gratuito da ~25 consultas al día, así que la historia de
+EPS completa tarda ~9 días (la app lo muestra como PARCIAL mientras tanto).
 
 ## Producción
 
@@ -94,6 +96,8 @@ npm run backtest -- POST 5        # walk-forward con los datos guardados
 - **Sesgo de supervivencia**: el universo son empresas grandes que existen hoy.
 - **Guidance, transcripciones y noticias por empresa**: sin fuente gratuita estructurada; el componente de guidance aparece como faltante explícito.
 - **Volatilidad implícita / movimiento implícito de opciones**: sin fuente autorizada gratuita.
+- **Universo ampliado**: lista curada a mano el 2026-10-30, no la composición oficial de un índice. La primera carga de
+  historia de EPS de las ~168 medianas toma unos 9 días (20 consultas diarias de Alpha Vantage); empiezan las que reportan pronto.
 - **BMV**: fuera del MVP (sin consenso gratuito); las emisoras quedan registradas como `BMV_PENDING`.
 - **Emisores extranjeros** (TSM, ASML): sin XBRL trimestral en EDGAR; se analizan con EPS y precios.
 - El ajuste por splits/dividendos de TwelveData no está verificado; se detectan saltos sospechosos y ajustes retroactivos.

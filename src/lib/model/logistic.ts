@@ -55,30 +55,37 @@ function softmax(z: number[]): number[] {
 
 export function fitLogistic(X: FeatureVector[], y: Outcome[], features: string[], o: { l2?: number; iters?: number; lr?: number } = {}): LogisticModel {
   const scaler = fitScaler(X, features);
-  const Z = X.map((r) => transform(scaler, r));
-  const n = Z.length;
+  const n = X.length;
   const p = features.length;
+  const P = p + 1; // con intercepto en la columna 0
   const K = CLASSES.length;
-  const yi = y.map((c) => CLASSES.indexOf(c));
+  // Matriz plana n × P (columna 0 = 1) para un bucle interno rápido.
+  const Z = new Float64Array(n * P);
+  for (let i = 0; i < n; i++) {
+    const zi = transform(scaler, X[i]);
+    Z[i * P] = 1;
+    for (let j = 0; j < p; j++) Z[i * P + j + 1] = zi[j];
+  }
+  const yi = Int8Array.from(y.map((c) => CLASSES.indexOf(c)));
   const l2 = o.l2 ?? 1;
   const lr = o.lr ?? 0.05;
-  const iters = o.iters ?? 600;
-  const W = Array.from({ length: K }, () => new Array(p + 1).fill(0));
-  const mW = W.map((r) => r.map(() => 0));
-  const vW = W.map((r) => r.map(() => 0));
+  const iters = o.iters ?? 300;
+  const W = new Float64Array(K * P);
+  const mW = new Float64Array(K * P);
+  const vW = new Float64Array(K * P);
+  const G = new Float64Array(K * P);
+  const z = new Float64Array(K);
   const b1 = 0.9;
   const b2 = 0.999;
-  const G = W.map((r) => r.map(() => 0));
-  const z = new Array(K).fill(0);
   for (let t = 1; t <= iters; t++) {
-    for (const row of G) row.fill(0);
+    G.fill(0);
     for (let i = 0; i < n; i++) {
-      const zi = Z[i];
+      const off = i * P;
       let mx = -Infinity;
       for (let c = 0; c < K; c++) {
-        const w = W[c];
-        let s = w[0];
-        for (let j = 0; j < p; j++) s += w[j + 1] * zi[j];
+        let s = 0;
+        const wo = c * P;
+        for (let j = 0; j < P; j++) s += W[wo + j] * Z[off + j];
         z[c] = s;
         if (s > mx) mx = s;
       }
@@ -89,23 +96,24 @@ export function fitLogistic(X: FeatureVector[], y: Outcome[], features: string[]
       }
       for (let c = 0; c < K; c++) {
         const g = z[c] / tot - (yi[i] === c ? 1 : 0);
-        const gc = G[c];
-        gc[0] += g;
-        for (let j = 0; j < p; j++) gc[j + 1] += g * zi[j];
+        const go = c * P;
+        for (let j = 0; j < P; j++) G[go + j] += g * Z[off + j];
       }
     }
+    const c1 = 1 - b1 ** t;
+    const c2 = 1 - b2 ** t;
     for (let c = 0; c < K; c++) {
-      for (let j = 0; j <= p; j++) {
-        const g = G[c][j] / n + (j > 0 ? (l2 / n) * W[c][j] : 0);
-        mW[c][j] = b1 * mW[c][j] + (1 - b1) * g;
-        vW[c][j] = b2 * vW[c][j] + (1 - b2) * g * g;
-        const mh = mW[c][j] / (1 - b1 ** t);
-        const vh = vW[c][j] / (1 - b2 ** t);
-        W[c][j] -= (lr * mh) / (Math.sqrt(vh) + 1e-8);
+      for (let j = 0; j < P; j++) {
+        const k = c * P + j;
+        const g = G[k] / n + (j > 0 ? (l2 / n) * W[k] : 0);
+        mW[k] = b1 * mW[k] + (1 - b1) * g;
+        vW[k] = b2 * vW[k] + (1 - b2) * g * g;
+        W[k] -= (lr * (mW[k] / c1)) / (Math.sqrt(vW[k] / c2) + 1e-8);
       }
     }
   }
-  return { kind: 'logistic', scaler, W, nTrain: n, l2 };
+  const Wout = Array.from({ length: K }, (_, c) => Array.from(W.subarray(c * P, (c + 1) * P)));
+  return { kind: 'logistic', scaler, W: Wout, nTrain: n, l2 };
 }
 
 export function predictLogistic(m: LogisticModel, r: FeatureVector): Probabilities {

@@ -38,7 +38,7 @@ export interface Sourced<T> {
 // ───────────────────────── Universo ─────────────────────────
 
 export type AssetClass = 'stock' | 'adr' | 'etf';
-export type UniverseOrigin = 'gbm-seed' | 'gbm-portfolio' | 'gbm-watchlist' | 'manual' | 'import';
+export type UniverseOrigin = 'gbm-seed' | 'gbm-portfolio' | 'gbm-watchlist' | 'manual' | 'import' | 'expansion';
 /** Qué tan cubierto está el símbolo para análisis de resultados. */
 export type EarningsCoverage = 'US_SEC' | 'US_FOREIGN_FILER' | 'NO_EARNINGS' | 'BMV_PENDING' | 'UNKNOWN';
 

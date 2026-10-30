@@ -10,7 +10,7 @@ import { epsSurprise, revenueSurprise } from '../analysis/surprise';
 import { quarterMetrics } from '../analysis/fundamentals';
 import { suspiciousSplits } from '../analysis/reaction';
 import { buildRows, preFeaturesForUpcoming, type EventRow, type SymbolData } from '../model/dataset';
-import { predict, train, type TrainedSet } from '../model/engine';
+import { predict, train, trainCached, type TrainedSet } from '../model/engine';
 import { runWalkForward, type WalkForwardResult } from '../backtest/walkforward';
 import { fitScore, scoreOf, scoreWalkForward } from '../score/earnings-score';
 import { avgDollarVolume, decide } from '../decision/engine';
@@ -123,7 +123,8 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
       wf.push(r);
       const set = r.liveSet ?? train(rows, mode, h, '9999-12-31');
       live.set(`${mode}:${h}`, set);
-      log(`Walk-forward ${mode} ${h}: n=${r.prob?.n ?? 0} skill=${r.prob?.skill?.toFixed(4) ?? 'n/d'}`);
+      const byG = r.probByGroup.filter((g) => g.prob).map((g) => `${g.group} ${g.prob!.skill.toFixed(4)} (n=${g.prob!.n})`).join(' · ');
+      log(`Walk-forward ${mode} ${h}: n=${r.prob?.n ?? 0} skill=${r.prob?.skill?.toFixed(4) ?? 'n/d'}${byG ? ` | ${byG}` : ''}`);
     }
   }
   const scoreModel = fitScore(rows, '9999-12-31');
@@ -192,7 +193,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
         for (const h of HORIZONS) {
           const ls = live.get(`POST:${h}`)!;
           // Punto en el tiempo: modelo entrenado solo con etiquetas terminadas antes del día 0.
-          const set = sessionsSince === 0 ? ls : { ...train(rows, 'POST', h, lastRow.day0Date), oosSkill: ls.oosSkill, oosN: ls.oosN };
+          const set = sessionsSince === 0 ? ls : { ...trainCached(rows, 'POST', h, lastRow.day0Date), oosSkill: ls.oosSkill, oosN: ls.oosN };
           const p = predict(set, { symbol: c.symbol, reportDate: lastRow.reportDate, decisionDate: lastRow.day0Date, features: lastRow.features.POST, basePrice: lastRow.day0Close, sigma: lastRow.sigma, roundTrip: o.roundTrip, createdAt: nowIso, missingCritical: lastRow.features.POST.eps_surprise_bps === null });
           predictions.push(p);
           if (sessionsSince === 0) {
@@ -353,7 +354,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
     mode: r.mode, horizon: r.horizon, testStart: r.testStart, testEnd: r.testEnd, folds: r.folds.length, prob: r.prob,
     strategies: r.strategies.map(({ equity: _e, ...rest }) => rest),
     equity: Object.fromEntries(r.strategies.filter((s) => s.equity.length).map((s) => [s.name, s.equity])),
-    bySector: r.bySector, byCap: r.byCap, byVolRegime: r.byVolRegime, warnings: r.warnings,
+    bySector: r.bySector, byUniverse: r.byUniverse, probByGroup: r.probByGroup, byCap: r.byCap, byVolRegime: r.byVolRegime, warnings: r.warnings,
   }));
 
   const coverage: Record<string, number> = {};

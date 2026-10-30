@@ -15,6 +15,7 @@ import { abnormalVolume, align, benchmarkReturn, classify, dailyVol, flatBand, l
 import { epsSurprise, revenueSurprise } from '../analysis/surprise';
 import { asOfQuarter, quarterMetrics } from '../analysis/fundamentals';
 import { mean } from '../util/stats';
+import { universeGroup } from '../universe/registry';
 
 export interface SymbolData {
   company: Company;
@@ -37,6 +38,8 @@ export interface EventRow {
   id: string;
   symbol: string;
   sector: string;
+  /** GBM (gigantes que sigues) | Medianas (ampliación) | Otras. */
+  group: string;
   reportDate: string;
   reportTime: string;
   twoSessionWindow: boolean;
@@ -205,6 +208,7 @@ export function buildRows(d: SymbolData, spy: Bar[], sector: Bar[] | null, round
       id: `${d.company.symbol}:${e.reportDate}`,
       symbol: d.company.symbol,
       sector: d.company.sector,
+      group: universeGroup(d.company),
       reportDate: e.reportDate,
       reportTime: e.reportTime,
       twoSessionWindow: a.twoSessionWindow,

@@ -1,13 +1,14 @@
 import { getStore, KEYS, type JsonStore } from '../src/lib/store';
 import type { UniverseRegistry } from '../src/lib/types';
-import { buildRegistry, importCandidates, seedCandidates, type Candidate } from '../src/lib/universe/registry';
+import { buildRegistry, expansionCandidates, importCandidates, seedCandidates, type Candidate } from '../src/lib/universe/registry';
+import { EXPANSION_LIST_DATE, expansionEnabled } from '../src/lib/universe/expansion';
 import { netlifyGbmReader, readGbmSources } from '../src/lib/universe/gbm-source';
 import { parseCsv, parseJsonImport } from '../src/lib/universe/normalize';
 import { promises as fs } from 'node:fs';
 
 export const log = (s: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${s}`);
 
-/** Sincroniza el universo: GBM (si hay credenciales) + copia del seed de GBM + data/universe-manual.(csv|json). */
+/** Sincroniza el universo: GBM (si hay credenciales) + copia del seed de GBM + ampliación de medianas + data/universe-manual.(csv|json). */
 export async function syncUniverse(store: JsonStore, env = process.env): Promise<UniverseRegistry> {
   const now = new Date().toISOString();
   const prev = await store.get<UniverseRegistry>(KEYS.registry);
@@ -19,6 +20,11 @@ export async function syncUniverse(store: JsonStore, env = process.env): Promise
     sources.push({ origin: 'gbm-seed', status: 'OK', detail: 'Copia local del universo semilla de GBM (respaldo)', checkedAt: now, count: seedCandidates().length });
   }
   cands.push(...gbm.candidates);
+  if (expansionEnabled(env)) {
+    const e = expansionCandidates();
+    cands.push(...e);
+    sources.push({ origin: 'expansion', status: 'OK', detail: `Ampliación curada de acciones medianas de EE.UU. (lista del ${EXPANSION_LIST_DATE}); UNIVERSE_EXPANSION=off la desactiva`, checkedAt: now, count: e.length });
+  }
   for (const f of ['data/universe-manual.csv', 'data/universe-manual.json']) {
     try {
       const text = await fs.readFile(f, 'utf8');

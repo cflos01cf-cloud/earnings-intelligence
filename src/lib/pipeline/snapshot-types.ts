@@ -80,6 +80,8 @@ export interface BacktestSummary {
   strategies: Omit<StrategyMetrics, 'equity'>[];
   equity: Record<string, { date: string; value: number }[]>;
   bySector: Breakdown[];
+  byUniverse: Breakdown[];
+  probByGroup: { group: string; prob: ProbMetrics | null }[];
   byCap: Breakdown[];
   byVolRegime: Breakdown[];
   warnings: string[];

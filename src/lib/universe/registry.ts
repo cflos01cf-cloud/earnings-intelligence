@@ -5,6 +5,7 @@
 import type { AssetClass, Company, EarningsCoverage, UniverseOrigin, UniverseRegistry } from '../types';
 import { normalizeTicker, type ImportRow } from './normalize';
 import { FOREIGN_FILERS, GBM_US_STOCKS, SECTOR_ETF } from './seed';
+import { EXPANSION } from './expansion';
 
 export interface Candidate {
   symbol: string;
@@ -21,6 +22,17 @@ export function seedCandidates(): Candidate[] {
   return GBM_US_STOCKS.map(([symbol, name, exchange, sector, assetClass, country]) => ({
     symbol, name, exchange, sector, assetClass, country, currency: 'USD', origin: 'gbm-seed',
   }));
+}
+
+export function expansionCandidates(): Candidate[] {
+  return EXPANSION.map(([symbol, name, exchange, sector, assetClass, country]) => ({ symbol, name, exchange, sector, assetClass, country, currency: 'USD', origin: 'expansion' }));
+}
+
+/** Grupo para comparar resultados: las gigantes que sigues en GBM contra la ampliación de medianas. */
+export function universeGroup(c: { origins: string[] }): 'GBM' | 'Medianas' | 'Otras' {
+  if (c.origins.some((o) => o.startsWith('gbm'))) return 'GBM';
+  if (c.origins.includes('expansion')) return 'Medianas';
+  return 'Otras';
 }
 
 export function importCandidates(rows: ImportRow[], origin: UniverseOrigin = 'import'): Candidate[] {

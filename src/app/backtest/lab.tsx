@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Calibration, Lines } from '@/components/charts';
 import type { Probabilities } from '@/lib/types';
 
-export interface LabPred { s: string; sec: string; d: string; m: Probabilities; b: Probabilities; o: 'UP' | 'DOWN' | 'FLAT'; r: number; e: string; g: boolean }
+export interface LabPred { s: string; sec: string; grp: string; d: string; m: Probabilities; b: Probabilities; o: 'UP' | 'DOWN' | 'FLAT'; r: number; e: string; g: boolean }
 export interface LabRun {
   mode: 'PRE' | 'POST';
   horizon: number;
@@ -13,6 +13,7 @@ export interface LabRun {
   equity: Record<string, { date: string; value: number }[]>;
   bySector: { group: string; trades: number; expectancy: number | null; winRate: number | null }[];
   byCap: { group: string; trades: number; expectancy: number | null; winRate: number | null }[];
+  byUniverse: { group: string; trades: number; expectancy: number | null; winRate: number | null }[];
   byVolRegime: { group: string; trades: number; expectancy: number | null; winRate: number | null }[];
   warnings: string[];
   preds: LabPred[];
@@ -35,6 +36,7 @@ export function Lab({ runs }: { runs: LabRun[] }) {
   const [mode, setMode] = useState<'PRE' | 'POST'>('POST');
   const [h, setH] = useState(5);
   const [sector, setSector] = useState('');
+  const [grp, setGrp] = useState('');
   const [symbol, setSymbol] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -46,7 +48,7 @@ export function Lab({ runs }: { runs: LabRun[] }) {
   const symbols = useMemo(() => [...new Set(runs.flatMap((r) => r.preds.map((p) => p.s)))].sort(), [runs]);
   const view = useMemo(() => {
     if (!run) return null;
-    const ps = run.preds.filter((p) => (!sector || p.sec === sector) && (!symbol || p.s === symbol) && (!from || p.d >= from) && (!to || p.d <= to));
+    const ps = run.preds.filter((p) => (!grp || p.grp === grp) && (!sector || p.sec === sector) && (!symbol || p.s === symbol) && (!from || p.d >= from) && (!to || p.d <= to));
     const cost = run.roundTrip * costMult;
     const llm = mean(ps.map((p) => ll(p.m, p.o)));
     const llb = mean(ps.map((p) => ll(p.b, p.o)));
@@ -75,7 +77,18 @@ export function Lab({ runs }: { runs: LabRun[] }) {
       strategies,
       cost,
     };
-  }, [run, sector, symbol, from, to, edge, costMult, gate, mode]);
+  }, [run, grp, sector, symbol, from, to, edge, costMult, gate, mode]);
+  const groups = useMemo(() => [...new Set(runs.flatMap((r) => r.preds.map((p) => p.grp)))].sort(), [runs]);
+  /** Habilidad fuera de muestra por grupo, en el escenario y horizonte elegidos (sin otros filtros). */
+  const skillByGroup = useMemo(() => {
+    if (!run) return [];
+    return groups.map((g) => {
+      const ps = run.preds.filter((p) => p.grp === g);
+      const llm = mean(ps.map((p) => ll(p.m, p.o)));
+      const llb = mean(ps.map((p) => ll(p.b, p.o)));
+      return { g, n: ps.length, skill: ps.length ? 1 - llm / llb : null };
+    });
+  }, [run, groups]);
 
   const sel = 'rounded border border-line bg-panel px-2 py-1 text-sm';
   return (
@@ -83,6 +96,7 @@ export function Lab({ runs }: { runs: LabRun[] }) {
       <div className="mb-6 flex flex-wrap items-end gap-3 text-sm">
         <label className="flex flex-col gap-1 text-xs text-muted">Escenario<select className={sel} value={mode} onChange={(e) => setMode(e.target.value as 'PRE' | 'POST')}><option value="POST">Después del reporte</option><option value="PRE">Antes del reporte</option></select></label>
         <label className="flex flex-col gap-1 text-xs text-muted">Horizonte<select className={sel} value={h} onChange={(e) => setH(Number(e.target.value))}>{[1, 5, 20].map((x) => <option key={x} value={x}>{x} sesiones</option>)}</select></label>
+        <label className="flex flex-col gap-1 text-xs text-muted">Universo<select className={sel} value={grp} onChange={(e) => setGrp(e.target.value)}><option value="">Todo</option>{groups.map((g) => <option key={g} value={g}>{g === 'GBM' ? 'Gigantes (GBM)' : g}</option>)}</select></label>
         <label className="flex flex-col gap-1 text-xs text-muted">Sector<select className={sel} value={sector} onChange={(e) => setSector(e.target.value)}><option value="">Todos</option>{sectors.map((s) => <option key={s}>{s}</option>)}</select></label>
         <label className="flex flex-col gap-1 text-xs text-muted">Activo<select className={sel} value={symbol} onChange={(e) => setSymbol(e.target.value)}><option value="">Todos</option>{symbols.map((s) => <option key={s}>{s}</option>)}</select></label>
         <label className="flex flex-col gap-1 text-xs text-muted">Desde<input type="date" className={sel} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
@@ -94,6 +108,19 @@ export function Lab({ runs }: { runs: LabRun[] }) {
       {!run || !view ? <p className="text-sm text-muted">Sin backtest para este escenario.</p> : (
         <>
           {run.warnings.map((w) => <p key={w} className="mb-1 text-sm text-warn">⚠ {w}</p>)}
+          {skillByGroup.length > 1 ? (
+            <div className="my-4 rounded border border-line bg-panel p-3 text-sm">
+              <div className="mb-2 text-xs text-muted">¿Dónde hay ventaja? Habilidad fuera de muestra por universo (mínimo para operar: +0.50% con ≥ 100 eventos)</div>
+              <div className="flex flex-wrap gap-6">
+                {skillByGroup.map((x) => (
+                  <div key={x.g}>
+                    <div className="text-xs text-muted">{x.g === 'GBM' ? 'Gigantes (GBM)' : x.g} · {x.n} eventos</div>
+                    <div className={`num text-lg ${x.skill !== null && x.skill > 0.005 && x.n >= 100 ? 'text-up' : 'text-fg'}`}>{signed(x.skill)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="my-4 grid grid-cols-2 gap-3 md:grid-cols-5">
             {[
               ['Eventos fuera de muestra', String(view.n)],
@@ -123,8 +150,8 @@ export function Lab({ runs }: { runs: LabRun[] }) {
               <tbody>{run.portfolio.map((s) => <tr key={s.name}><td>{s.name}</td><td className="num text-right">{s.trades}</td><td className="num text-right">{signed(s.netReturn, 1)}</td><td className="num text-right">{signed(s.cagr, 1)}</td><td className="num text-right">{signed(s.maxDrawdown, 1)}</td><td className="num text-right">{f2(s.sharpe)}</td><td className="num text-right">{f2(s.sortino)}</td><td className="num text-right">{f2(s.calmar)}</td><td className="num text-right">{pct(s.winRate, 0)}</td><td className="num text-right">{signed(s.expectancy)}</td></tr>)}</tbody>
             </table>
           </div>
-          <div className="mt-6 grid gap-6 md:grid-cols-3">
-            {([['Por sector', run.bySector], ['Por capitalización (aprox.)', run.byCap], ['Por régimen de volatilidad', run.byVolRegime]] as const).map(([t, rows]) => (
+          <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {([['Por universo', run.byUniverse], ['Por sector', run.bySector], ['Por capitalización (aprox.)', run.byCap], ['Por régimen de volatilidad', run.byVolRegime]] as const).map(([t, rows]) => (
               <div key={t}>
                 <h4 className="mb-2 text-sm text-muted">{t} — señales del modelo</h4>
                 {rows.length ? <table className="tbl w-full text-sm"><tbody>{rows.map((r) => <tr key={r.group}><td>{r.group}</td><td className="num text-right">{r.trades}</td><td className="num text-right">{signed(r.expectancy)}</td><td className="num text-right">{pct(r.winRate, 0)}</td></tr>)}</tbody></table> : <p className="text-xs text-muted">Sin operaciones.</p>}

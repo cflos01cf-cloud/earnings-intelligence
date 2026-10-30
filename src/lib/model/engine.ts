@@ -35,6 +35,26 @@ export function trainingRows(rows: EventRow[], mode: Mode, h: Horizon, cutoff: s
   });
 }
 
+/**
+ * Caché de modelos por (filas, modo, horizonte, corte). El corte se redondea hacia ATRÁS al inicio de su
+ * semestre (1-ene o 1-jul): el modelo nunca ve más datos que los disponibles en la fecha pedida, solo
+ * posiblemente menos. Así el walk-forward y las predicciones por empresa comparten entrenamientos.
+ */
+const CACHE = new WeakMap<EventRow[], Map<string, TrainedSet>>();
+export function refitDate(d: string): string {
+  if (d >= '9999') return d;
+  return `${d.slice(0, 4)}-${d.slice(5, 7) < '07' ? '01' : '07'}-01`;
+}
+export function trainCached(rows: EventRow[], mode: Mode, h: Horizon, cutoff: string): TrainedSet {
+  const c = refitDate(cutoff);
+  let m = CACHE.get(rows);
+  if (!m) CACHE.set(rows, (m = new Map()));
+  const k = `${mode}:${h}:${c}`;
+  let set = m.get(k);
+  if (!set) m.set(k, (set = train(rows, mode, h, c)));
+  return set;
+}
+
 export function train(rows: EventRow[], mode: Mode, h: Horizon, cutoff: string): TrainedSet {
   const tr = trainingRows(rows, mode, h, cutoff);
   const y = tr.map((r) => r.labels[mode][h]!.outcome);
@@ -54,7 +74,7 @@ export function train(rows: EventRow[], mode: Mode, h: Horizon, cutoff: string):
  * y se evalúa en el 25% más reciente; gana la λ con menor log loss. Luego se reentrena con todo.
  * Si ninguna λ supera al baseline en esa validación, se devuelve el modelo con la λ más fuerte (casi baseline).
  */
-export const L2_GRID = [L2, 10, 50, 200, 1000];
+export const L2_GRID = [L2, 30, 300];
 function fitWithSelectedL2(tr: EventRow[], y: Outcome[], mode: Mode, features: string[]): LogisticModel {
   const order = tr.map((r, i) => ({ d: decisionDate(r, mode), i })).sort((a, b) => a.d.localeCompare(b.d)).map((x) => x.i);
   const cut = Math.floor(order.length * 0.75);
@@ -64,7 +84,7 @@ function fitWithSelectedL2(tr: EventRow[], y: Outcome[], mode: Mode, features: s
   if (valIdx.length >= 20 && fitIdx.length >= 40) {
     let bestLL = Infinity;
     for (const l2 of L2_GRID) {
-      const m = fitLogistic(fitIdx.map((i) => tr[i].features[mode]), fitIdx.map((i) => y[i]), features, { l2, iters: 300 });
+      const m = fitLogistic(fitIdx.map((i) => tr[i].features[mode]), fitIdx.map((i) => y[i]), features, { l2, iters: 80 });
       const ll = mean(valIdx.map((i) => logLoss(predictLogistic(m, tr[i].features[mode]), y[i])));
       if (ll < bestLL) {
         bestLL = ll;
@@ -72,7 +92,7 @@ function fitWithSelectedL2(tr: EventRow[], y: Outcome[], mode: Mode, features: s
       }
     }
   }
-  return fitLogistic(tr.map((r) => r.features[mode]), y, features, { l2: best });
+  return fitLogistic(tr.map((r) => r.features[mode]), y, features, { l2: best, iters: 150 });
 }
 
 export function probsFor(set: TrainedSet, f: FeatureVector): { probs: Probabilities; model: ModelName } {

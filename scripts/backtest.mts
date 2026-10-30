@@ -18,5 +18,6 @@ const r = runWalkForward(rows, new Map(ds.symbols.map((s) => [s.company.symbol, 
 const p = (x: number | null | undefined, d = 2) => (x == null ? 'n/d' : x.toFixed(d));
 console.log(`${mode} ${h} sesiones · eventos fuera de muestra ${r.prob?.n ?? 0} · ${r.testStart} → ${r.testEnd} · costo ida y vuelta ${(rt * 100).toFixed(2)}%`);
 if (r.prob) console.log(`Brier ${p(r.prob.brierModel, 4)} (baseline ${p(r.prob.brierBaseline, 4)}) · log loss ${p(r.prob.logLossModel, 4)} (baseline ${p(r.prob.logLossBaseline, 4)}) · habilidad ${p(r.prob.skill, 4)}`);
+for (const g of r.probByGroup) if (g.prob) console.log(`  ${g.group.padEnd(10)} n=${g.prob.n} habilidad ${p(g.prob.skill, 4)}`);
 for (const s of r.strategies) console.log(`${s.name.padEnd(34)} ops ${String(s.trades).padStart(4)} · gana ${p(s.winRate && s.winRate * 100, 0)}% · esperanza ${p(s.expectancy && s.expectancy * 100)}% · neto ${p(s.netReturn * 100, 1)}% · Sharpe ${p(s.sharpe)} · DD ${p(s.maxDrawdown * 100, 1)}%`);
 for (const w of r.warnings) console.log(`AVISO: ${w}`);

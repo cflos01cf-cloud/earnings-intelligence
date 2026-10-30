@@ -16,10 +16,11 @@ export default async function BacktestPage() {
     portfolio: r.strategies.map((s) => ({ name: s.name, trades: s.trades, netReturn: s.netReturn, cagr: s.cagr, maxDrawdown: s.maxDrawdown, sharpe: s.sharpe, sortino: s.sortino, calmar: s.calmar, winRate: s.winRate, expectancy: s.expectancy })),
     equity: Object.fromEntries(r.strategies.filter((s) => s.equity.length).map((s) => [s.name, s.equity])),
     bySector: r.bySector,
+    byUniverse: r.byUniverse ?? [],
     byCap: r.byCap,
     byVolRegime: r.byVolRegime,
     warnings: r.warnings,
-    preds: r.predictions.map((p) => ({ s: p.symbol, sec: p.sector, d: p.decisionDate, m: p.model, b: p.baseline, o: p.outcome, r: p.ret, e: p.epsVerdict, g: p.gateOpen })),
+    preds: r.predictions.map((p) => ({ s: p.symbol, sec: p.sector, grp: p.group ?? 'GBM', d: p.decisionDate, m: p.model, b: p.baseline, o: p.outcome, r: p.ret, e: p.epsVerdict, g: p.gateOpen })),
   }));
   const sv = snap.scoreValidation;
   return (

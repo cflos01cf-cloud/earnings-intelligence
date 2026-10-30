@@ -10,7 +10,7 @@
  */
 import type { Bar, Horizon, Mode, Outcome, Probabilities } from '../types';
 import type { EventRow } from '../model/dataset';
-import { decisionDate, probsFor, train, type TrainedSet } from '../model/engine';
+import { decisionDate, probsFor, train, trainCached, type TrainedSet } from '../model/engine';
 import { brier, logLoss } from '../model/logistic';
 import { MIN_TRAIN_EVENTS } from '../config';
 import { lowerBound } from '../analysis/reaction';
@@ -22,6 +22,7 @@ export interface OosPrediction {
   id: string;
   symbol: string;
   sector: string;
+  group: string;
   decisionDate: string;
   endDate: string;
   model: Probabilities;
@@ -89,6 +90,10 @@ export interface WalkForwardResult {
   prob: ProbMetrics | null;
   strategies: StrategyMetrics[];
   bySector: Breakdown[];
+  /** GBM (gigantes) vs. Medianas: operaciones del modelo. */
+  byUniverse: Breakdown[];
+  /** Habilidad de las probabilidades por grupo del universo (¿dónde hay ventaja?). */
+  probByGroup: { group: string; prob: ProbMetrics | null }[];
   byCap: Breakdown[];
   byVolRegime: Breakdown[];
   predictions: OosPrediction[];
@@ -261,7 +266,7 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
   const K = o.maxConcurrent ?? 10;
   const warnings: string[] = [];
   const rows = allRows.filter((r) => r.labels[mode][h] && r.sigma).sort((a, b) => decisionDate(a, mode).localeCompare(decisionDate(b, mode)));
-  const base: WalkForwardResult = { mode, horizon: h, generatedAt: o.generatedAt ?? new Date().toISOString(), roundTrip, edge, maxConcurrent: K, testStart: null, testEnd: null, folds: [], prob: null, strategies: [], bySector: [], byCap: [], byVolRegime: [], predictions: [], warnings };
+  const base: WalkForwardResult = { mode, horizon: h, generatedAt: o.generatedAt ?? new Date().toISOString(), roundTrip, edge, maxConcurrent: K, testStart: null, testEnd: null, folds: [], prob: null, strategies: [], bySector: [], byUniverse: [], probByGroup: [], byCap: [], byVolRegime: [], predictions: [], warnings };
   if (rows.length < MIN_TRAIN_EVENTS + 20) {
     warnings.push(`Evidencia insuficiente: ${rows.length} eventos con etiqueta (se necesitan al menos ${MIN_TRAIN_EVENTS + 20}).`);
     return base;
@@ -276,7 +281,8 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
   let liveSet: TrainedSet | undefined;
   for (let s = start; s <= stop; s = addMonths(s, step)) {
     const e = addMonths(s, step);
-    const set = train(allRows, mode, h, s);
+    // Reentrenamiento semestral (corte redondeado hacia atrás): sin información futura y 2× más rápido.
+    const set = trainCached(allRows, mode, h, s);
     const test = rows.filter((r) => {
       const d = decisionDate(r, mode);
       return d >= s && d < e && (!o.sector || r.sector === o.sector) && (!o.symbol || r.symbol === o.symbol);
@@ -289,7 +295,7 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
       const f = r.features[mode];
       const l = r.labels[mode][h]!;
       const model = probsFor(set, f).probs;
-      preds.push({ id: r.id, symbol: r.symbol, sector: r.sector, decisionDate: decisionDate(r, mode), endDate: l.endDate, model, baseline: set.baseline.probs, usedModel: set.logistic ? 'logistic' : 'baseline', outcome: l.outcome, ret: l.ret, epsVerdict: r.facts.epsVerdict, capApprox: r.capApprox, marketVol20: r.marketVol20, trainN: set.nTrain, gateOpen });
+      preds.push({ id: r.id, symbol: r.symbol, sector: r.sector, group: r.group, decisionDate: decisionDate(r, mode), endDate: l.endDate, model, baseline: set.baseline.probs, usedModel: set.logistic ? 'logistic' : 'baseline', outcome: l.outcome, ret: l.ret, epsVerdict: r.facts.epsVerdict, capApprox: r.capApprox, marketVol20: r.marketVol20, trainN: set.nTrain, gateOpen });
     }
   }
   base.predictions = preds;
@@ -301,8 +307,9 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
 
   // Estrategias
   const barsOK = (p: OosPrediction) => barsBy.has(p.symbol);
+  const rowById = new Map(rows.map((r) => [r.id, r]));
   const toTrade = (p: OosPrediction): Trade => {
-    const row = rows.find((r) => r.id === p.id)!;
+    const row = rowById.get(p.id)!;
     const entryDate = mode === 'PRE' ? row.baseDate : row.day0Date;
     return { symbol: p.symbol, entryDate, exitDate: p.endDate, ret: p.ret, entryAt: 'close' };
   };
@@ -327,6 +334,8 @@ export function runWalkForward(allRows: EventRow[], barsBy: Map<string, Bar[]>, 
 
   const take = (p: OosPrediction) => p.gateOpen && isLongSignal(p.model, edge);
   base.bySector = breakdown(preds, take, (p) => p.sector, roundTrip);
+  base.byUniverse = breakdown(preds, take, (p) => p.group, roundTrip);
+  base.probByGroup = [...new Set(preds.map((p) => p.group))].sort().map((g) => ({ group: g, prob: probMetrics(preds.filter((p) => p.group === g)) }));
   const caps = preds.map((p) => p.capApprox).filter((x): x is number => x !== null);
   const c33 = caps.length ? quantile(caps, 1 / 3) : NaN;
   const c66 = caps.length ? quantile(caps, 2 / 3) : NaN;

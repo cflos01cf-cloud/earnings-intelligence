@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { syntheticWorld } from '@/lib/demo/synthetic';
 import { buildRows, preFeaturesForUpcoming, type EventRow } from '@/lib/model/dataset';
-import { predict, train } from '@/lib/model/engine';
+import { predict, refitDate, train } from '@/lib/model/engine';
 import { fitLogistic, predictLogistic } from '@/lib/model/logistic';
 import { runWalkForward } from '@/lib/backtest/walkforward';
 import { fitScore, scoreOf } from '@/lib/score/earnings-score';
@@ -105,8 +105,10 @@ describe('walk-forward', () => {
     expect(model.trades).toBeGreaterThan(0);
     expect(r.liveSet!.oosSkill).toBe(r.prob!.skill);
     // Cada bloque se entrenó solo con etiquetas terminadas antes de su inicio.
+    // Cada bloque se entrenó solo con etiquetas terminadas antes de su corte semestral (≤ inicio del bloque).
     for (const f of r.folds) {
-      const set = train(rows, 'POST', 20, f.start);
+      expect(refitDate(f.start) <= f.start).toBe(true);
+      const set = train(rows, 'POST', 20, refitDate(f.start));
       expect(set.nTrain).toBe(f.trainN);
     }
   }, 60_000);

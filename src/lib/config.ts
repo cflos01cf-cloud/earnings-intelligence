@@ -1,7 +1,7 @@
 /**
  * Parámetros fijados ANTES de entrenar o probar. Cambiarlos cambia `MODEL_VERSION`.
  */
-export const MODEL_VERSION = 'ei-v1';
+export const MODEL_VERSION = 'ei-v2';
 
 /** Costos por lado en GBM para acciones de EE.UU.: comisión 0.25% + IVA 16%, más deslizamiento estimado. */
 export interface Costs { commissionPct: number; vatPct: number; slippagePct: number; spreadPct: number }
