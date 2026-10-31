@@ -15,7 +15,8 @@
     "backtest": "tsx --env-file-if-exists=.env.local scripts/backtest.mts",
     "ci:daily": "tsx --env-file-if-exists=.env.local scripts/ci-daily.mts",
     "probe": "tsx --env-file-if-exists=.env.local scripts/probe.mts",
-    "demo:build": "tsx scripts/demo-build.mts"
+    "demo:build": "tsx scripts/demo-build.mts",
+    "upload:local": "tsx --env-file-if-exists=.env.local scripts/upload-local.mts"
   },
   "dependencies": {
     "@netlify/blobs": "^11.1.3",
