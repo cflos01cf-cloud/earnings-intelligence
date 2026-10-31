@@ -8,7 +8,7 @@
  */
 import type { FactorContribution, Horizon, Mode, ModelName, Outcome, Prediction, Probabilities } from '../types';
 import { MIN_TRAIN_EVENTS, MODEL_VERSION, L2 } from '../config';
-import { FEATURE_LABELS, POST_FEATURES, PRE_FEATURES, type EventRow, type FeatureVector } from './dataset';
+import { FEATURE_LABELS, POST_FEATURES, PRE_FEATURES, usableFeatures, type EventRow, type FeatureVector } from './dataset';
 import { contributions, fitBaseline, fitLogistic, logLoss, predictLogistic, type BaselineModel, type LogisticModel } from './logistic';
 import { mean, quantile } from '../util/stats';
 
@@ -26,6 +26,8 @@ export interface TrainedSet {
   /** Habilidad fuera de muestra (1 − logloss_modelo / logloss_baseline), si ya se corrió el walk-forward. */
   oosSkill: number | null;
   oosN: number;
+  /** Variables candidatas descartadas por baja cobertura histórica. */
+  droppedFeatures?: string[];
 }
 
 export function trainingRows(rows: EventRow[], mode: Mode, h: Horizon, cutoff: string): EventRow[] {
@@ -63,10 +65,10 @@ export function train(rows: EventRow[], mode: Mode, h: Horizon, cutoff: string):
     const l = r.labels[mode][h]!;
     zByClass[l.outcome].push(l.ret / (r.sigma! * Math.sqrt(h)));
   }
-  const features = mode === 'PRE' ? PRE_FEATURES : POST_FEATURES;
-  const logistic = tr.length >= MIN_TRAIN_EVENTS ? fitWithSelectedL2(tr, y, mode, features) : null;
+  const { use: features, dropped } = usableFeatures(tr.map((r) => ({ features: r.features, decision: decisionDate(r, mode) })), mode, mode === 'PRE' ? PRE_FEATURES : POST_FEATURES);
+  const logistic = tr.length >= MIN_TRAIN_EVENTS && features.length ? fitWithSelectedL2(tr, y, mode, features) : null;
   const last = tr.map((r) => r.labels[mode][h]!.endDate).sort().at(-1) ?? '';
-  return { mode, horizon: h, baseline: fitBaseline(y), logistic, zByClass, nTrain: tr.length, trainedThrough: last, oosSkill: null, oosN: 0 };
+  return { mode, horizon: h, baseline: fitBaseline(y), logistic, zByClass, nTrain: tr.length, trainedThrough: last, oosSkill: null, oosN: 0, droppedFeatures: dropped.map((d) => d.feature) };
 }
 
 /**

@@ -125,3 +125,32 @@ describe('Bitácora: no registrar predicciones cuyo resultado ya era conocible',
     expect(r.added).toBe(1);
   });
 });
+
+import { POST_FEATURES, PRE_FEATURES, usableFeatures, buildRows } from '@/lib/model/dataset';
+import { train } from '@/lib/model/engine';
+import { syntheticWorld } from '@/lib/demo/synthetic';
+describe('Modelo: variables que dependen de la fecha (caso real 31-oct)', () => {
+  it('las banderas de disponibilidad no son variables del modelo', () => {
+    expect(PRE_FEATURES).not.toContain('has_fund');
+    expect(POST_FEATURES).not.toContain('has_rev_surprise');
+  });
+  it('una variable presente solo en los reportes recientes se descarta', () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      decision: `2020-01-${String((i % 28) + 1).padStart(2, '0')}`.replace('2020', String(2010 + Math.floor(i / 20))),
+      features: { PRE: {}, POST: { a: i, recent: i >= 170 ? 0.05 : null } } as never,
+    }));
+    const r = usableFeatures(rows, 'POST', ['a', 'recent']);
+    expect(r.use).toEqual(['a']);
+    expect(r.dropped[0].feature).toBe('recent');
+  });
+  it('en el entrenamiento real, el consenso de ingresos reciente queda fuera', () => {
+    const w = syntheticWorld({ nSymbols: 20, signal: 1, seed: 3 });
+    const rows = w.symbols.flatMap((s) => buildRows(s, w.spy, null, 0.0071));
+    // Simula Finnhub: sorpresa de ingresos solo en el último 10% de los reportes.
+    const cut = [...rows].map((r) => r.day0Date).sort()[Math.floor(rows.length * 0.9)];
+    for (const r of rows) if (r.day0Date < cut) r.features.POST.rev_surprise_pct = null;
+    const set = train(rows, 'POST', 20, '9999-12-31');
+    expect(set.droppedFeatures).toContain('rev_surprise_pct');
+    expect(set.logistic!.scaler.features).not.toContain('rev_surprise_pct');
+  });
+});

@@ -122,6 +122,7 @@ export async function buildSnapshot(ds: Dataset, o: BuildOptions): Promise<{ sna
       const r = runWalkForward(rows, barsBy, ds.spy, { mode, horizon: h, roundTrip: o.roundTrip, generatedAt: nowIso });
       wf.push(r);
       const set = r.liveSet ?? train(rows, mode, h, '9999-12-31');
+      if (set.droppedFeatures?.length) log(`Modelo ${mode} ${h}: variables sin cobertura histórica suficiente (no se usan): ${set.droppedFeatures.join(', ')}`);
       live.set(`${mode}:${h}`, set);
       const byG = r.probByGroup.filter((g) => g.prob).map((g) => `${g.group} ${g.prob!.skill.toFixed(4)} (n=${g.prob!.n})`).join(' · ');
       log(`Walk-forward ${mode} ${h}: n=${r.prob?.n ?? 0} skill=${r.prob?.skill?.toFixed(4) ?? 'n/d'}${byG ? ` | ${byG}` : ''}`);

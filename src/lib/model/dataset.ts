@@ -100,8 +100,37 @@ export const FEATURE_LABELS: Record<string, string> = {
   abvol0: 'Volumen anormal del día 0',
 };
 
-export const PRE_FEATURES = ['hist_n', 'hist_mean_react', 'hist_abs_react', 'hist_beat_rate', 'hist_sell_news', 'runup20_rel', 'mom60_rel', 'vol60', 'spy20', 'sector20_rel', 'prev_surprise_bps', 'fund_rev_yoy', 'fund_opm_chg', 'fund_fcf_margin', 'fund_accrual', 'has_fund'];
-export const POST_FEATURES = [...PRE_FEATURES, 'eps_surprise_bps', 'eps_beat', 'rev_surprise_pct', 'has_rev_surprise', 'react0', 'react0_abn', 'react0_z', 'react0_x_surprise', 'intraday0', 'abvol0'];
+/**
+ * Variables candidatas del modelo. Las banderas de disponibilidad (has_fund, has_rev_surprise) NO entran:
+ * su valor depende de CUÁNDO ocurrió el reporte (p. ej. el consenso de ingresos solo existe para los últimos
+ * meses), así que el modelo aprendería "reporte reciente" en vez de algo de la empresa. Se conservan en el
+ * vector solo para mostrarlas. Además, `usableFeatures` descarta las que tienen poca cobertura histórica.
+ */
+export const PRE_FEATURES = ['hist_n', 'hist_mean_react', 'hist_abs_react', 'hist_beat_rate', 'hist_sell_news', 'runup20_rel', 'mom60_rel', 'vol60', 'spy20', 'sector20_rel', 'prev_surprise_bps', 'fund_rev_yoy', 'fund_opm_chg', 'fund_fcf_margin', 'fund_accrual'];
+export const POST_FEATURES = [...PRE_FEATURES, 'eps_surprise_bps', 'eps_beat', 'rev_surprise_pct', 'react0', 'react0_abn', 'react0_z', 'react0_x_surprise', 'intraday0', 'abvol0'];
+
+export const MIN_FEATURE_COVERAGE = 0.5;
+export const MIN_FEATURE_COVERAGE_OLDEST_HALF = 0.3;
+
+/**
+ * Variables con cobertura suficiente EN TODO el periodo de entrenamiento: presentes en ≥ 50% de las filas y en
+ * ≥ 30% de la mitad más antigua. Una variable que solo existe en los reportes recientes se convierte en un
+ * indicador de fecha y produce probabilidades espurias.
+ */
+export function usableFeatures(rows: { features: Record<Mode, FeatureVector>; decision: string }[], mode: Mode, candidates: string[]): { use: string[]; dropped: { feature: string; coverage: number; oldestHalf: number }[] } {
+  const sorted = [...rows].sort((a, b) => a.decision.localeCompare(b.decision));
+  const old = sorted.slice(0, Math.floor(sorted.length / 2));
+  const cov = (xs: typeof rows, f: string) => (xs.length ? xs.filter((r) => typeof r.features[mode][f] === 'number').length / xs.length : 0);
+  const use: string[] = [];
+  const dropped: { feature: string; coverage: number; oldestHalf: number }[] = [];
+  for (const f of candidates) {
+    const c = cov(sorted, f);
+    const o = cov(old, f);
+    if (c >= MIN_FEATURE_COVERAGE && o >= MIN_FEATURE_COVERAGE_OLDEST_HALF) use.push(f);
+    else dropped.push({ feature: f, coverage: c, oldestHalf: o });
+  }
+  return { use, dropped };
+}
 
 const clip = (x: number | null, lo: number, hi: number) => (x === null ? null : Math.max(lo, Math.min(hi, x)));
 
