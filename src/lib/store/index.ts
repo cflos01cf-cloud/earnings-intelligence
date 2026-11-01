@@ -5,6 +5,7 @@
  *  - memory: pruebas.
  */
 import { promises as fs } from 'node:fs';
+import { cleanCredential } from '../util/credentials';
 import path from 'node:path';
 
 export interface JsonStore {
@@ -82,8 +83,8 @@ export function fileStore(dir = path.join(process.cwd(), '.data')): JsonStore {
 }
 
 export function netlifyBlobsStore(env: Record<string, string | undefined>): JsonStore {
-  const siteID = env.NETLIFY_SITE_ID;
-  const token = env.NETLIFY_BLOBS_TOKEN;
+  const siteID = cleanCredential(env.NETLIFY_SITE_ID);
+  const token = cleanCredential(env.NETLIFY_BLOBS_TOKEN);
   const open = async () => {
     const { getStore } = await import('@netlify/blobs');
     return siteID && token ? getStore({ name: EI_BLOBS_STORE, siteID, token }) : getStore(EI_BLOBS_STORE);

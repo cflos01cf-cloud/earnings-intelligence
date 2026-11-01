@@ -78,10 +78,28 @@ import { credentialProblem, netlifyGbmReader } from '@/lib/universe/gbm-source';
 describe('credenciales de GBM mal copiadas (caso real 31-oct)', () => {
   it('detecta el valor oculto con •••', async () => {
     expect(credentialProblem('GBM_BLOBS_TOKEN', '••••••••••••')).toMatch(/oculto/);
-    expect(credentialProblem('GBM_BLOBS_TOKEN', 'nfp_abc123 ')).toMatch(/espacios/);
+    expect(credentialProblem('GBM_BLOBS_TOKEN', 'nfp_abc 123')).toMatch(/espacios/);
     expect(credentialProblem('GBM_BLOBS_TOKEN', 'nfp_abc123')).toBeNull();
     const r = await readGbmSources(netlifyGbmReader({ GBM_NETLIFY_SITE_ID: 'x', GBM_BLOBS_TOKEN: '••••' } as unknown as NodeJS.ProcessEnv));
     expect(r.sources[0]).toMatchObject({ status: 'ERROR' });
     expect(r.sources[0].detail).toMatch(/oculto/);
+  });
+});
+
+import { cleanCredential } from '@/lib/util/credentials';
+import { netlifyBlobsStore } from '@/lib/store';
+describe('credenciales con espacio o salto de línea en los bordes (caso real 1-nov)', () => {
+  it('se recortan en vez de fallar: nunca forman parte de un Site ID ni de un token', () => {
+    expect(cleanCredential('  abc-123\r\n')).toBe('abc-123');
+    expect(cleanCredential('\uFEFFabc\u200B')).toBe('abc');
+    expect(cleanCredential(' \n')).toBeUndefined();
+    expect(credentialProblem('GBM_NETLIFY_SITE_ID', '2f1c-site-id\n')).toBeNull();
+    expect(credentialProblem('GBM_NETLIFY_SITE_ID', '2f1c site-id')).toMatch(/en medio/);
+  });
+  it('el lector de GBM y el almacén propio usan el valor recortado', () => {
+    const reader = netlifyGbmReader({ GBM_NETLIFY_SITE_ID: 'site-id\n', GBM_BLOBS_TOKEN: ' nfp_abc ' } as unknown as NodeJS.ProcessEnv);
+    expect(reader).not.toBeNull();
+    expect(netlifyBlobsStore({ NETLIFY_SITE_ID: 'site\n', NETLIFY_BLOBS_TOKEN: 'nfp_x ' }).label).toMatch(/API/);
+    expect(netlifyBlobsStore({ NETLIFY_SITE_ID: ' \n', NETLIFY_BLOBS_TOKEN: 'nfp_x' }).label).not.toMatch(/API/);
   });
 });

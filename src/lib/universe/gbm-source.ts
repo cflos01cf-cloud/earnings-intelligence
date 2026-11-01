@@ -7,6 +7,7 @@
  */
 import type { AssetClass, UniverseRegistry } from '../types';
 import type { Candidate } from './registry';
+import { cleanCredential, credentialProblem } from '../util/credentials';
 
 export const GBM_STORE = 'gbm-trend-engine';
 
@@ -15,23 +16,19 @@ interface GbmPortfolio { positions?: { symbol?: string }[]; watchlist?: string[]
 
 export type BlobReader = (key: string) => Promise<unknown>;
 
-/** Detecta credenciales copiadas de una pantalla que las oculta (•••) o con espacios/saltos de línea. */
-export function credentialProblem(name: string, value: string | undefined): string | null {
-  if (!value) return null;
-  if (/[\u2022\u25CF*]{3,}/.test(value)) return `${name} contiene puntos de ocultamiento (•••): se copió el valor oculto, no el real. Crea un token nuevo y pégalo completo.`;
-  if (/[^\x21-\x7E]/.test(value)) return `${name} contiene espacios, saltos de línea u otros caracteres no válidos. Vuelve a pegarlo sin espacios.`;
-  return null;
-}
+export { credentialProblem } from '../util/credentials';
 
 export function netlifyGbmReader(env: NodeJS.ProcessEnv): BlobReader | null {
-  if (!env.GBM_NETLIFY_SITE_ID || !env.GBM_BLOBS_TOKEN) return null;
-  const bad = credentialProblem('GBM_BLOBS_TOKEN', env.GBM_BLOBS_TOKEN) ?? credentialProblem('GBM_NETLIFY_SITE_ID', env.GBM_NETLIFY_SITE_ID);
+  const siteID = cleanCredential(env.GBM_NETLIFY_SITE_ID);
+  const token = cleanCredential(env.GBM_BLOBS_TOKEN);
+  if (!siteID || !token) return null;
+  const bad = credentialProblem('GBM_BLOBS_TOKEN', token) ?? credentialProblem('GBM_NETLIFY_SITE_ID', siteID);
   if (bad) return async () => {
     throw new Error(bad);
   };
   return async (key) => {
     const { getStore } = await import('@netlify/blobs');
-    const store = getStore({ name: GBM_STORE, siteID: env.GBM_NETLIFY_SITE_ID!, token: env.GBM_BLOBS_TOKEN! });
+    const store = getStore({ name: GBM_STORE, siteID, token });
     return (await store.get(key, { type: 'json' })) ?? null;
   };
 }
