@@ -73,3 +73,15 @@ describe('registro central', () => {
     expect(r.sources.every((s) => s.status === 'ERROR')).toBe(true);
   });
 });
+
+import { credentialProblem, netlifyGbmReader } from '@/lib/universe/gbm-source';
+describe('credenciales de GBM mal copiadas (caso real 31-oct)', () => {
+  it('detecta el valor oculto con •••', async () => {
+    expect(credentialProblem('GBM_BLOBS_TOKEN', '••••••••••••')).toMatch(/oculto/);
+    expect(credentialProblem('GBM_BLOBS_TOKEN', 'nfp_abc123 ')).toMatch(/espacios/);
+    expect(credentialProblem('GBM_BLOBS_TOKEN', 'nfp_abc123')).toBeNull();
+    const r = await readGbmSources(netlifyGbmReader({ GBM_NETLIFY_SITE_ID: 'x', GBM_BLOBS_TOKEN: '••••' } as unknown as NodeJS.ProcessEnv));
+    expect(r.sources[0]).toMatchObject({ status: 'ERROR' });
+    expect(r.sources[0].detail).toMatch(/oculto/);
+  });
+});
