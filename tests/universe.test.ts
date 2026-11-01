@@ -103,3 +103,18 @@ describe('credenciales con espacio o salto de línea en los bordes (caso real 1-
     expect(netlifyBlobsStore({ NETLIFY_SITE_ID: ' \n', NETLIFY_BLOBS_TOKEN: 'nfp_x' }).label).not.toMatch(/API/);
   });
 });
+
+describe('sector curado frente al ranking en vivo de GBM (caso real 1-nov)', () => {
+  it('Costco y Walmart conservan Consumer Staples → XLP aunque GBM diga Consumer', () => {
+    const live = candidatesFromRanking({ assets: [
+      { entry: { symbol: 'COST', assetClass: 'stock', sector: 'Consumer' } },
+      { entry: { symbol: 'WMT', assetClass: 'stock', sector: 'Consumer' } },
+      { entry: { symbol: 'ZZZZ', assetClass: 'stock', sector: 'Consumer' } },
+    ] });
+    const { registry } = buildRegistry(live, null, []);
+    const by = (s: string) => registry.companies.find((c) => c.symbol === s)!;
+    expect(by('COST')).toMatchObject({ sector: 'Consumer Staples', sectorEtf: 'XLP' });
+    expect(by('WMT').sectorEtf).toBe('XLP');
+    expect(by('ZZZZ')).toMatchObject({ sector: 'Consumer', sectorEtf: 'XLY' });
+  });
+});

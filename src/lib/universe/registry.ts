@@ -18,6 +18,13 @@ export interface Candidate {
   origin: UniverseOrigin;
 }
 
+/**
+ * Sector curado de las acciones del seed. El ranking de GBM usa etiquetas más gruesas (p. ej. Costco y
+ * Walmart como "Consumer"), lo que cambiaría su ETF sectorial de referencia (XLP → XLY). Para estas
+ * emisoras manda el sector curado; para el resto, el primer valor no vacío.
+ */
+const SEED_SECTOR = new Map(GBM_US_STOCKS.map(([symbol, , , sector]) => [symbol, sector]));
+
 export function seedCandidates(): Candidate[] {
   return GBM_US_STOCKS.map(([symbol, name, exchange, sector, assetClass, country]) => ({
     symbol, name, exchange, sector, assetClass, country, currency: 'USD', origin: 'gbm-seed',
@@ -68,7 +75,7 @@ export function buildRegistry(candidates: Candidate[], prev: UniverseRegistry | 
     const assetClass: AssetClass = cand.assetClass ?? (FOREIGN_FILERS.has(n.symbol) ? 'adr' : 'stock');
     const market = n.market;
     const country = cand.country ?? (market === 'BMV' ? 'MX' : market === 'US' ? 'US' : '??');
-    const sector = cand.sector || prevBy.get(n.symbol)?.sector || 'Sin clasificar';
+    const sector = SEED_SECTOR.get(n.symbol) || cand.sector || prevBy.get(n.symbol)?.sector || 'Sin clasificar';
     const c: Company & { _market: string } = {
       _market: market,
       symbol: n.symbol,
