@@ -1,5 +1,5 @@
 // Corrida diaria (GitHub Actions, después del cierre): universo → ingesta → modelos → snapshot → bitácora.
-import { getStore, log, syncUniverse } from './_common.mts';
+import { checkStore, getStore, log, syncUniverse } from './_common.mts';
 import { ingest } from '../src/lib/pipeline/ingest';
 import { buildSnapshot, loadDataset } from '../src/lib/pipeline/build';
 import { inScope } from '../src/lib/universe/registry';
@@ -9,6 +9,7 @@ import type { EarningsSnapshot } from '../src/lib/pipeline/snapshot-types';
 
 const t0 = Date.now();
 const store = getStore();
+await checkStore(store);
 log(`Almacén: ${store.label}`);
 const registry = await syncUniverse(store);
 const { statuses, registry: reg2 } = await ingest(registry, registry.companies.filter(inScope), { store, env: process.env, log });

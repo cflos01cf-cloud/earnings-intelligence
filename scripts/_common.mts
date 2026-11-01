@@ -2,7 +2,7 @@ import { getStore, KEYS, type JsonStore } from '../src/lib/store';
 import type { UniverseRegistry } from '../src/lib/types';
 import { buildRegistry, expansionCandidates, importCandidates, seedCandidates, type Candidate } from '../src/lib/universe/registry';
 import { EXPANSION_LIST_DATE, expansionEnabled } from '../src/lib/universe/expansion';
-import { netlifyGbmReader, readGbmSources } from '../src/lib/universe/gbm-source';
+import { credentialProblem, netlifyGbmReader, readGbmSources } from '../src/lib/universe/gbm-source';
 import { parseCsv, parseJsonImport } from '../src/lib/universe/normalize';
 import { promises as fs } from 'node:fs';
 
@@ -41,6 +41,32 @@ export async function syncUniverse(store: JsonStore, env = process.env): Promise
   for (const w of warnings) log(`Universo: ${w}`);
   await store.put(KEYS.registry, registry);
   return registry;
+}
+
+/**
+ * Verifica el almacén propio antes de trabajar. Si las credenciales están mal, falla con un mensaje claro
+ * (qué secreto revisar) en lugar del error interno de Netlify.
+ */
+export async function checkStore(store: JsonStore, env = process.env): Promise<void> {
+  if (store.label.startsWith('Netlify Blobs (API)')) {
+    for (const k of ['NETLIFY_BLOBS_TOKEN', 'NETLIFY_SITE_ID']) {
+      const bad = credentialProblem(k, env[k]);
+      if (bad) throw new Error(`Almacén propio: ${bad}`);
+    }
+  }
+  try {
+    await store.get(KEYS.registry);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/\b401\b|Access Denied|\b403\b/.test(msg)) {
+      throw new Error(
+        'Almacén propio (Netlify Blobs) rechazó el acceso (401). El secreto NETLIFY_BLOBS_TOKEN no tiene permiso sobre el sitio NETLIFY_SITE_ID. ' +
+          'Revisa que NETLIFY_SITE_ID sea el del sitio earnings-intelligence y que NETLIFY_BLOBS_TOKEN sea un token personal vigente de la MISMA cuenta de Netlify ' +
+          '(si borraste o regeneraste el token, actualiza este secreto con el nuevo).',
+      );
+    }
+    throw e;
+  }
 }
 
 export { getStore, KEYS };

@@ -1,4 +1,4 @@
-import { getStore, log } from './_common.mts';
+import { checkStore, getStore, log } from './_common.mts';
 import { KEYS } from '../src/lib/store';
 import { buildSnapshot, loadDataset } from '../src/lib/pipeline/build';
 import { costsFromEnv, roundTripCost } from '../src/lib/config';
@@ -6,6 +6,7 @@ import type { UniverseRegistry } from '../src/lib/types';
 import type { EarningsSnapshot } from '../src/lib/pipeline/snapshot-types';
 
 const store = getStore();
+await checkStore(store);
 const registry = await store.get<UniverseRegistry>(KEYS.registry);
 if (!registry) throw new Error('No hay universo: corre primero `npm run ingest`.');
 const ds = await loadDataset(store, registry);
